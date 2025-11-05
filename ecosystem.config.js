@@ -13,7 +13,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3003,
-        NEXT_PUBLIC_API_URL: 'https://api.lego.nileagi.com',
+        NEXT_PUBLIC_API_URL: 'https://api.lega.nileagi.com',
       },
       error_file: './logs/frontend-error.log',
       out_file: './logs/frontend-out.log',

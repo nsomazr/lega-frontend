@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Frontend Deployment Script for Lega
-# Frontend URL: https://lego.nileagi.com
+# Frontend URL: https://lega.nileagi.com
 # Port: 3003
 
 set -e  # Exit on error
@@ -21,7 +21,7 @@ cd "$SCRIPT_DIR"
 # Set environment variables
 export PORT=3003
 export NODE_ENV=production
-export NEXT_PUBLIC_API_URL=https://api.lego.nileagi.com
+export NEXT_PUBLIC_API_URL=https://api.lega.nileagi.com
 
 echo -e "${YELLOW}📦 Installing dependencies...${NC}"
 npm install --production=false
@@ -47,7 +47,7 @@ pm2 save
 # pm2 startup
 
 echo -e "${GREEN}✅ Frontend deployment completed successfully!${NC}"
-echo -e "${GREEN}🌐 Application running on: https://lego.nileagi.com${NC}"
+echo -e "${GREEN}🌐 Application running on: https://lega.nileagi.com${NC}"
 echo -e "${GREEN}📊 Check status with: pm2 status lega-frontend${NC}"
 echo -e "${GREEN}📋 View logs with: pm2 logs lega-frontend${NC}"
 echo -e "${GREEN}🔄 Restart with: pm2 restart lega-frontend${NC}"
