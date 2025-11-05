@@ -69,6 +69,7 @@ export default function DocumentsPage() {
   const [confirmDelete, setConfirmDelete] = useState<{ isOpen: boolean, docId: number, filename: string }>({ isOpen: false, docId: 0, filename: '' });
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['/']));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileFolderSidebarOpen, setMobileFolderSidebarOpen] = useState(false);
   const [uploadFolder, setUploadFolder] = useState('/');
   const [showBulkMoveModal, setShowBulkMoveModal] = useState(false);
   const [bulkMoveDest, setBulkMoveDest] = useState('/');
@@ -680,20 +681,26 @@ export default function DocumentsPage() {
     return (
       <div className="space-y-1">
         {parentPath === '/' && (
-          <button
-            onClick={() => {
-              setCurrentFolder('/');
-              setUploadFolder('/');
-            }}
-            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-              currentFolder === '/' 
-                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium' 
-                : 'text-secondary-700 dark:text-secondary-300 hover:bg-secondary-100 dark:hover:bg-secondary-800'
-            }`}
-          >
-            <Home className="h-4 w-4 flex-shrink-0" />
-            <span className="truncate">All Documents</span>
-          </button>
+                  <button
+                    onClick={() => {
+                      setCurrentFolder('/');
+                      setUploadFolder('/');
+                      setMobileFolderSidebarOpen(false); // Close mobile sidebar when folder is selected
+                    }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      currentFolder === '/' 
+                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium' 
+                        : 'text-secondary-700 dark:text-secondary-300 hover:bg-secondary-100 dark:hover:bg-secondary-800'
+                    }`}
+                  >
+                    <Home className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">All Documents</span>
+                    {currentFolder === '/' && (
+                      <span className="ml-auto text-xs text-secondary-500 dark:text-secondary-400">
+                        {documents.filter(d => (d.folder_path || '/') === '/').length}
+                      </span>
+                    )}
+                  </button>
         )}
         
         {children
@@ -732,6 +739,7 @@ export default function DocumentsPage() {
                     onClick={() => {
                       setCurrentFolder(folder);
                       setUploadFolder(folder);
+                      setMobileFolderSidebarOpen(false); // Close mobile sidebar when folder is selected
                       if (hasChildren && !expandedFolders.has(folder)) {
                         setExpandedFolders(prev => new Set([...Array.from(prev), folder]));
                       }
@@ -748,6 +756,14 @@ export default function DocumentsPage() {
                       <Folder className="h-4 w-4 flex-shrink-0 text-primary-500" />
                     )}
                     <span className="truncate flex-1">{folderName}</span>
+                    {isSelected && (
+                      <span className="ml-auto text-xs text-secondary-500 dark:text-secondary-400">
+                        {documents.filter(d => {
+                          const docFolder = d.folder_path || '/';
+                          return docFolder === folder;
+                        }).length}
+                      </span>
+                    )}
                   </button>
                   <div className="relative flex-shrink-0">
                     <button
@@ -876,17 +892,31 @@ export default function DocumentsPage() {
   return (
     <DashboardLayout>
       <ToastContainer toasts={toasts} onClose={removeToast} />
+      {/* Mobile folder sidebar overlay */}
+      {mobileFolderSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setMobileFolderSidebarOpen(false)}
+        />
+      )}
+      
       <div className="flex flex-col md:flex-row h-[calc(100vh-4rem)] gap-4 md:gap-6">
-        {/* Sidebar */}
-        <div className={`hidden md:flex ${sidebarCollapsed ? 'w-12' : 'w-64'} flex-shrink-0 transition-all duration-300 flex-col bg-secondary-50 dark:bg-secondary-900/50 rounded-xl p-4 relative`}>
+        {/* Sidebar - visible on mobile when toggled, always visible on desktop */}
+        <div className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto ${sidebarCollapsed ? 'w-12' : 'w-64'} flex-shrink-0 transition-all duration-300 flex-col bg-secondary-50 dark:bg-secondary-900/50 rounded-xl p-4 relative transform transition-transform duration-300 ease-in-out ${
+          mobileFolderSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}>
           <div className="flex items-center justify-between mb-4">
             {!sidebarCollapsed && (
-              <h3 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100 uppercase tracking-wide">Folders</h3>
+              <div>
+                <h3 className="text-base font-semibold text-secondary-900 dark:text-secondary-100">My Folders</h3>
+                <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-0.5">Organize your documents</p>
+              </div>
             )}
             <button
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               className="p-1.5 rounded-lg hover:bg-secondary-200 dark:hover:bg-secondary-800 transition-colors"
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               <ChevronRight className={`h-4 w-4 text-secondary-600 dark:text-secondary-400 transition-transform ${sidebarCollapsed ? '' : 'rotate-180'}`} />
             </button>
@@ -901,17 +931,18 @@ export default function DocumentsPage() {
               <div className="space-y-2 pt-4 border-t border-secondary-200 dark:border-secondary-700">
                 <button
                   onClick={() => { setNewFolderName(''); setShowCreateFolder(true); }}
-                  className="w-full btn-secondary btn-sm flex items-center justify-center gap-2"
+                  className="w-full btn-primary btn-sm flex items-center justify-center gap-2 font-medium"
                 >
                   <FolderPlus className="h-4 w-4" />
-                  New Folder
+                  Create Folder
                 </button>
                 <button
                   onClick={handleCleanupFolders}
-                  className="w-full btn-outline btn-sm flex items-center justify-center gap-2"
+                  className="w-full btn-ghost btn-sm flex items-center justify-center gap-2 text-xs text-secondary-500 dark:text-secondary-400 hover:text-secondary-700 dark:hover:text-secondary-300"
+                  title="Remove empty folders"
                 >
-                  <Trash className="h-4 w-4" />
-                  Cleanup
+                  <Trash className="h-3.5 w-3.5" />
+                  Clean Empty Folders
                 </button>
               </div>
             </>
@@ -923,11 +954,21 @@ export default function DocumentsPage() {
         {/* Header */}
           <div className="mb-6">
             <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-3xl font-bold text-secondary-900 dark:text-secondary-100">Documents</h1>
-              <p className="text-secondary-600 dark:text-secondary-400 mt-1">
-                Manage and analyze your legal documents with powerful insights.
-              </p>
+            <div className="flex items-center gap-3">
+              {/* Mobile folder toggle button */}
+              <button
+                onClick={() => setMobileFolderSidebarOpen(!mobileFolderSidebarOpen)}
+                className="md:hidden p-2 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors"
+                title="Toggle folders"
+              >
+                <FolderTree className="h-5 w-5 text-secondary-600 dark:text-secondary-400" />
+              </button>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-secondary-900 dark:text-secondary-100">Documents</h1>
+                <p className="text-sm sm:text-base text-secondary-600 dark:text-secondary-400 mt-1">
+                  Upload, organize, and manage your legal documents
+                </p>
+              </div>
             </div>
               <div className="flex items-center gap-3">
               <div className="flex items-center bg-secondary-100 dark:bg-secondary-800 rounded-xl p-1">
@@ -953,15 +994,15 @@ export default function DocumentsPage() {
                 </button>
               </div>
             
-              <label className="btn-primary btn-md cursor-pointer flex items-center hover-lift hover-glow transition-all duration-300">
-                <Upload className="h-4 w-4 mr-2" />
+              <label className="btn-primary btn-md cursor-pointer flex items-center gap-2 font-medium shadow-md hover:shadow-lg transition-all duration-300">
+                <Upload className="h-4 w-4" />
                 {uploading ? (
-                  <div className="flex items-center">
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                    Uploading...
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Uploading...</span>
                   </div>
                 ) : (
-                  'Upload Document'
+                  <span>Upload</span>
                 )}
                 <input
                   type="file"
@@ -969,6 +1010,7 @@ export default function DocumentsPage() {
                   accept=".pdf,.docx,.doc,.txt,.csv,.xls,.xlsx,.md,.json,.xml"
                   onChange={handleFileUpload}
                   disabled={uploading}
+                  multiple
                 />
               </label>
           </div>
@@ -1007,8 +1049,8 @@ export default function DocumentsPage() {
               <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-secondary-400 dark:text-secondary-500" />
               <input
                 type="text"
-                placeholder="Search documents by name, tags, or content..."
-                    className="input pl-12 pr-4 py-2.5 w-full"
+                placeholder="Search by name, tags, or content..."
+                    className="input pl-12 pr-4 py-2.5 w-full text-base"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -1017,7 +1059,8 @@ export default function DocumentsPage() {
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center sm:justify-between">
               <div className="flex flex-wrap gap-3 sm:gap-4 items-center w-full sm:w-auto">
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-secondary-700 dark:text-secondary-300">Type:</label>
+                  <label className="text-sm font-medium text-secondary-700 dark:text-secondary-300 hidden sm:inline">File Type:</label>
+                  <label className="text-sm font-medium text-secondary-700 dark:text-secondary-300 sm:hidden">Type:</label>
                   <select
                     value={filterType}
                     onChange={(e) => setFilterType(e.target.value)}
@@ -1032,11 +1075,12 @@ export default function DocumentsPage() {
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-secondary-700 dark:text-secondary-300 whitespace-nowrap">Sort by:</label>
+                  <label className="text-sm font-medium text-secondary-700 dark:text-secondary-300 whitespace-nowrap hidden sm:inline">Sort by:</label>
+                  <label className="text-sm font-medium text-secondary-700 dark:text-secondary-300 whitespace-nowrap sm:hidden">Sort:</label>
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
-                    className="input py-2 px-3 text-sm min-w-[160px]"
+                    className="input py-2 px-3 text-sm min-w-[140px] sm:min-w-[160px]"
                   >
                     <option value="newest">Newest First</option>
                     <option value="oldest">Oldest First</option>
@@ -1050,10 +1094,16 @@ export default function DocumentsPage() {
                 <div className="text-sm text-secondary-600 dark:text-secondary-400 font-medium">
                   {selectedDocuments.length > 0 ? (
                     <span className="text-primary-600 dark:text-primary-400 font-semibold">
-                      {selectedDocuments.length} selected
+                      {selectedDocuments.length} {selectedDocuments.length === 1 ? 'document' : 'documents'} selected
                     </span>
                   ) : (
-                    `${filteredDocuments.length} of ${documents.length} documents`
+                    <span>
+                      {filteredDocuments.length === documents.length ? (
+                        <>{filteredDocuments.length} {filteredDocuments.length === 1 ? 'document' : 'documents'}</>
+                      ) : (
+                        <>{filteredDocuments.length} of {documents.length} {documents.length === 1 ? 'document' : 'documents'}</>
+                      )}
+                    </span>
                   )}
                 </div>
                 {selectedDocuments.length > 0 && (
@@ -1137,11 +1187,13 @@ export default function DocumentsPage() {
                 <div className="mx-auto w-24 h-24 bg-secondary-100 dark:bg-secondary-800 rounded-full flex items-center justify-center mb-6">
                   <FileText className="h-12 w-12 text-secondary-400 dark:text-secondary-500" />
                 </div>
-                <h3 className="text-xl font-semibold text-secondary-900 dark:text-secondary-100 mb-2">No documents found</h3>
+                <h3 className="text-xl font-semibold text-secondary-900 dark:text-secondary-100 mb-2">
+                  {documents.length === 0 ? 'No documents yet' : 'No documents found'}
+                </h3>
                 <p className="text-secondary-600 dark:text-secondary-400 mb-6 max-w-md mx-auto">
                   {documents.length === 0 
-                    ? 'Get started by uploading your first document to begin managing your legal files.' 
-                    : `No documents in ${currentFolder === '/' ? 'root' : currentFolder}. Try selecting a different folder or uploading documents here.`}
+                    ? 'Upload your first document to get started. You can organize them into folders and use AI to analyze them.' 
+                    : `No documents in ${currentFolder === '/' ? 'this location' : `"${currentFolder}"`}. Try a different folder or upload documents here.`}
                 </p>
                 {documents.length === 0 && (
                   <label className="btn-primary btn-md cursor-pointer flex items-center hover-lift hover-glow transition-all duration-300 mx-auto w-fit">

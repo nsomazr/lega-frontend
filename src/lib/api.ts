@@ -19,20 +19,24 @@ api.interceptors.request.use((config) => {
     }
   }
   
-  // Extend timeout for chat/AI endpoints that may take longer
-  const chatEndpoints = [
+  // Extend timeout for endpoints that may take longer due to slow servers or complex queries
+  const slowEndpoints = [
     '/api/chat/query-documents',
     '/api/chat/sessions',
     '/api/chat/sessions/',
+    '/api/lawyers/', // Portfolio and client endpoints
+    '/api/clients/', // Client listing endpoints
+    '/api/admin/users', // Admin user queries
   ];
   
-  const isChatEndpoint = chatEndpoints.some(endpoint => 
+  const isSlowEndpoint = slowEndpoints.some(endpoint => 
     config.url?.includes(endpoint)
   );
   
-  // If it's a chat endpoint and no custom timeout is set, use 120 seconds (2 minutes)
-  if (isChatEndpoint && !config.timeout) {
-    config.timeout = 120000; // 2 minutes for AI/chat requests
+  // If it's a slow endpoint, override timeout to 120 seconds (2 minutes)
+  // This ensures slow server requests have enough time
+  if (isSlowEndpoint) {
+    config.timeout = 120000; // 2 minutes for slow requests
   }
   
   return config;
