@@ -29,3 +29,4 @@ export default function BarChart({ data }: { data: Point[] }) {
 
 
 
+

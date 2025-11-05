@@ -1322,29 +1322,44 @@ function ChatContent() {
                   </div>
                 )}
                 
-                <div className="flex items-center space-x-3">
-                  <div className="relative flex-1">
-                    {/* Model selector inside input (left side) */}
-                    <div className="absolute left-3 flex items-center gap-2 z-10" style={{ top: '50%', transform: 'translateY(-50%)' }}>
-                      <span className="text-xs text-secondary-500 dark:text-secondary-400 font-medium whitespace-nowrap">Model:</span>
+                <div className="space-y-2">
+                  {/* Model selector - above input on mobile, inside on desktop */}
+                  <div className="flex items-center gap-2 sm:hidden">
+                    <span className="text-xs text-secondary-500 dark:text-secondary-400 font-medium whitespace-nowrap">Model:</span>
                     <select
                       value={model}
                       onChange={(e)=>setModel(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-xs px-2.5 py-1.5 rounded-md border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 hover:bg-secondary-50 dark:hover:bg-secondary-700 transition-colors cursor-pointer shadow-sm min-w-[110px]"
-                        title={`Current model: ${modelOptions.find(m => m.value === model)?.label || model}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-xs px-2.5 py-1.5 rounded-md border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 hover:bg-secondary-50 dark:hover:bg-secondary-700 transition-colors cursor-pointer shadow-sm flex-1"
+                      title={`Current model: ${modelOptions.find(m => m.value === model)?.label || model}`}
                     >
                       {modelOptions.map(m => (
                         <option key={m.value} value={m.value}>{m.label}</option>
                       ))}
                     </select>
                   </div>
+                  <div className="relative flex-1 w-full">
+                    {/* Model selector - inside input on desktop */}
+                    <div className="hidden sm:flex absolute left-3 items-center gap-2 z-10" style={{ top: '50%', transform: 'translateY(-50%)' }}>
+                      <span className="text-xs text-secondary-500 dark:text-secondary-400 font-medium whitespace-nowrap">Model:</span>
+                      <select
+                        value={model}
+                        onChange={(e)=>setModel(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs px-2.5 py-1.5 rounded-md border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 hover:bg-secondary-50 dark:hover:bg-secondary-700 transition-colors cursor-pointer shadow-sm min-w-[110px]"
+                        title={`Current model: ${modelOptions.find(m => m.value === model)?.label || model}`}
+                      >
+                        {modelOptions.map(m => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
+                      </select>
+                    </div>
                     <textarea
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyPress={handleKeyPress}
                       placeholder={documentId ? "Ask a question about this document..." : "Ask me anything..."}
-                      className="w-full pl-[240px] pr-36 px-4 border border-secondary-300 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none bg-white dark:bg-secondary-800 shadow-sm transition-all duration-200 placeholder-secondary-400 dark:placeholder-secondary-500 text-sm text-secondary-900 dark:text-secondary-100"
+                      className="w-full pl-4 sm:pl-[240px] pr-20 sm:pr-36 py-4 border border-secondary-300 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none bg-white dark:bg-secondary-800 shadow-sm transition-all duration-200 placeholder-secondary-400 dark:placeholder-secondary-500 text-sm text-secondary-900 dark:text-secondary-100"
                       rows={2}
                       disabled={sending}
                       style={{ 
@@ -1388,7 +1403,7 @@ function ChatContent() {
                       <button
                         onClick={handleClearInput}
                         disabled={!newMessage.trim()}
-                        className="p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed hidden sm:flex"
                         title="Clear message"
                         aria-label="Clear message"
                       >
@@ -1397,7 +1412,7 @@ function ChatContent() {
                   <button
                     onClick={() => (sending ? handleStop() : sendMessage(newMessage))}
                     disabled={!newMessage.trim() && !sending}
-                        className={`ml-1 px-3 h-9 rounded-md shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center ${sending ? 'bg-secondary-600 text-white hover:bg-secondary-700' : 'bg-primary-600 hover:bg-primary-700 text-white'}`}
+                        className={`px-2 sm:px-3 h-8 sm:h-9 rounded-md shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center ${sending ? 'bg-secondary-600 text-white hover:bg-secondary-700' : 'bg-primary-600 hover:bg-primary-700 text-white'}`}
                         title={sending ? 'Pause' : 'Send'}
                         aria-label={sending ? 'Pause' : 'Send'}
                   >

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Bell, Search, Menu, X, PanelLeft, User, LogOut, Settings } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { Bell, Search, Menu, X, PanelLeft, User, LogOut, Settings, LayoutDashboard, FolderOpen, FileText, MessageSquare, FileType, Users, Activity } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 
 interface User {
@@ -24,6 +25,61 @@ export default function Header({ user, onToggleSidebar }: HeaderProps) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
+
+  // Navigation items based on user role
+  const navigation = [
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Cases', href: '/cases', icon: FolderOpen },
+    { name: 'Documents', href: '/documents', icon: FileText },
+    { name: 'Chat', href: '/chat', icon: MessageSquare },
+    { name: 'Templates', href: '/templates', icon: FileType },
+  ];
+
+  const clientNavigation = [
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'My Cases', href: '/cases', icon: FolderOpen },
+    { name: 'Chat', href: '/chat', icon: MessageSquare },
+    { name: 'Lawyers Portal', href: '/clients/lawyers', icon: Users },
+  ];
+
+  const lawyerNavigation = [
+    { name: 'Portfolio', href: '/lawyers/portfolio', icon: Users },
+    { name: 'Staff', href: '/lawyers/staff', icon: Users },
+  ];
+
+  const adminNavigation = [
+    { name: 'Users', href: '/admin/users', icon: Users },
+    { name: 'Activity', href: '/admin/activity', icon: Activity },
+  ];
+
+  let allNavigation = navigation;
+  if (user.role === 'admin') {
+    allNavigation = [...navigation, ...adminNavigation];
+  } else if (user.role === 'lawyer') {
+    allNavigation = [...navigation, ...lawyerNavigation];
+  } else if (user.role === 'client') {
+    allNavigation = clientNavigation;
+  }
+
+  // Close mobile menu when route changes
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  // Close mobile menu when clicking outside
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      const handleClickOutside = (event: MouseEvent) => {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.mobile-menu-container')) {
+          setMobileMenuOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [mobileMenuOpen]);
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
@@ -175,6 +231,90 @@ export default function Header({ user, onToggleSidebar }: HeaderProps) {
           </div>
         </div>
       </div>
+
+      {/* Mobile Menu Overlay */}
+      {mobileMenuOpen && (
+        <>
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          
+          {/* Mobile Menu Drawer */}
+          <div className="mobile-menu-container fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-secondary-800 border-r border-secondary-200 dark:border-secondary-700 transform transition-transform duration-300 ease-in-out md:hidden">
+            <div className="flex flex-col h-full">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-4 border-b border-secondary-200 dark:border-secondary-700">
+                <div className="flex items-center space-x-3">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-lg">
+                    <span className="text-xl font-bold text-white">L</span>
+                  </div>
+                  <span className="text-xl font-bold gradient-text">Lega</span>
+                </div>
+                <button
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-2 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors"
+                  aria-label="Close menu"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Navigation */}
+              <nav className="flex-1 overflow-y-auto px-3 py-4">
+                <div className="space-y-1">
+                  {allNavigation.map((item) => {
+                    const isActive = pathname === item.href;
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.name}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={`flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+                          isActive
+                            ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400'
+                            : 'text-secondary-600 dark:text-secondary-400 hover:text-secondary-900 dark:hover:text-secondary-100 hover:bg-secondary-100 dark:hover:bg-secondary-700'
+                        }`}
+                      >
+                        <Icon className="h-5 w-5 mr-3 flex-shrink-0" />
+                        <span>{item.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </nav>
+
+              {/* Footer */}
+              <div className="border-t border-secondary-200 dark:border-secondary-700 p-4 space-y-2">
+                <Link
+                  href="/settings"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+                    pathname === '/settings'
+                      ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400'
+                      : 'text-secondary-600 dark:text-secondary-400 hover:text-secondary-900 dark:hover:text-secondary-100 hover:bg-secondary-100 dark:hover:bg-secondary-700'
+                  }`}
+                >
+                  <Settings className="h-5 w-5 mr-3 flex-shrink-0" />
+                  <span>Settings</span>
+                </Link>
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    handleLogout();
+                  }}
+                  className="w-full flex items-center px-3 py-2.5 text-sm font-medium text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20 rounded-xl transition-colors duration-200"
+                >
+                  <LogOut className="h-5 w-5 mr-3 flex-shrink-0" />
+                  <span>Sign out</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </header>
   );
 }
