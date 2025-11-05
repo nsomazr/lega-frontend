@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { Home } from 'lucide-react';
+import WelcomeGuide from '@/components/WelcomeGuide';
 
 interface User {
   id: number;
@@ -71,6 +72,8 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-background dark:to-accent-950 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      {/* Support assistant - visible on register page */}
+      <WelcomeGuide storageKey="lega_has_seen_welcome_v2" />
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-40 -right-32 w-80 h-80 bg-primary-200 dark:bg-primary-800 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob"></div>

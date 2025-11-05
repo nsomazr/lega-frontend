@@ -138,7 +138,8 @@ export default function CaseDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && currentUser.role === 'lawyer') {
+    // Make transfer/collaborator lists available for both lawyers and admins
+    if (currentUser && (currentUser.role === 'lawyer' || currentUser.role === 'admin')) {
       fetchAvailableLawyers();
     }
   }, [currentUser]);
@@ -154,10 +155,19 @@ export default function CaseDetailPage() {
 
   const fetchAvailableLawyers = async () => {
     try {
-      const response = await api.get('/api/lawyers/recommend?limit=100');
+      // Use the all lawyers endpoint for case management
+      const response = await api.get('/api/lawyers/all');
       setAvailableLawyers(response.data || []);
     } catch (error) {
       console.error('Error fetching lawyers:', error);
+      // Fallback to recommend endpoint if all endpoint doesn't exist
+      try {
+        const fallbackResponse = await api.get('/api/lawyers/recommend?limit=200');
+        setAvailableLawyers(fallbackResponse.data || []);
+      } catch (fallbackError) {
+        console.error('Error fetching lawyers (fallback):', fallbackError);
+        showError('Failed to load lawyers list');
+      }
     }
   };
 
@@ -664,10 +674,10 @@ export default function CaseDetailPage() {
             <div className="flex items-center gap-2">
               {(currentUser?.role === 'lawyer' && caseData.lawyer_id === currentUser.id) || currentUser?.role === 'admin' ? (
                 <>
-                  <button onClick={() => setShowTransferModal(true)} className="btn-secondary btn-sm inline-flex items-center gap-2" title="Transfer Case">
+                  <button onClick={() => setShowTransferModal(true)} className="btn-primary btn-sm inline-flex items-center gap-2" title="Transfer Case">
                     <ArrowRightLeft className="h-4 w-4" /> <span className="hidden sm:inline">Transfer</span>
                   </button>
-                  <button onClick={() => setShowCollaboratorModal(true)} className="btn-secondary btn-sm inline-flex items-center gap-2" title="Add Collaborator">
+                  <button onClick={() => setShowCollaboratorModal(true)} className="btn-primary btn-sm inline-flex items-center gap-2" title="Add Collaborator">
                     <AddCollaborator className="h-4 w-4" /> <span className="hidden sm:inline">Collaborate</span>
                   </button>
                 </>
@@ -1800,8 +1810,8 @@ export default function CaseDetailPage() {
                   />
                 </div>
                 <div className="flex gap-3 justify-end">
-                  <button type="button" onClick={() => setShowTransferModal(false)} className="btn-secondary">Cancel</button>
-                  <button type="submit" className="btn-primary">Transfer Case</button>
+                  <button type="button" onClick={() => setShowTransferModal(false)} className="btn-secondary btn-md">Cancel</button>
+                  <button type="submit" className="btn-primary btn-md">Transfer Case</button>
                 </div>
               </form>
             </div>
@@ -1872,8 +1882,8 @@ export default function CaseDetailPage() {
                   />
                 </div>
                 <div className="flex gap-3 justify-end">
-                  <button type="button" onClick={() => setShowCollaboratorModal(false)} className="btn-secondary">Cancel</button>
-                  <button type="submit" className="btn-primary">Add Collaborator</button>
+                  <button type="button" onClick={() => setShowCollaboratorModal(false)} className="btn-secondary btn-md">Cancel</button>
+                  <button type="submit" className="btn-primary btn-md">Add Collaborator</button>
                 </div>
               </form>
             </div>

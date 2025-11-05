@@ -19,11 +19,64 @@ api.interceptors.request.use((config) => {
     }
   }
   
+  // Validate and fix path parameters that should be integers
+  if (config.url) {
+    // Fix lawyer_id in path - matches /api/lawyers/{id} but not /api/lawyers/all, /api/lawyers/recommend, /api/lawyers/staff
+    const lawyerIdMatch = config.url.match(/\/api\/lawyers\/([^\/]+)/);
+    if (lawyerIdMatch && lawyerIdMatch[1]) {
+      const lawyerId = lawyerIdMatch[1];
+      // Skip if it's a known endpoint that doesn't need ID
+      if (lawyerId !== 'all' && lawyerId !== 'recommend' && lawyerId !== 'staff' && !lawyerId.startsWith('staff/')) {
+        // Check for invalid values
+        if (lawyerId === 'undefined' || lawyerId === 'null' || lawyerId === '' || lawyerId.trim() === '') {
+          console.error('BLOCKING invalid lawyer_id in URL:', lawyerId, 'from URL:', config.url);
+          // Create a rejected promise to prevent the request
+          const error = new Error(`Invalid lawyer_id: ${lawyerId}`);
+          (error as any).config = config;
+          (error as any).isAxiosError = true;
+          throw error;
+        }
+        const parsedId = parseInt(String(lawyerId), 10);
+        if (isNaN(parsedId) || parsedId <= 0) {
+          console.error('BLOCKING invalid lawyer_id in URL:', lawyerId, 'from URL:', config.url);
+          // Create a rejected promise to prevent the request
+          const error = new Error(`Invalid lawyer_id: ${lawyerId}`);
+          (error as any).config = config;
+          (error as any).isAxiosError = true;
+          throw error;
+        }
+        // Replace with properly parsed integer (ensures it's a number, not string)
+        if (String(parsedId) !== lawyerId) {
+          config.url = config.url.replace(`/lawyers/${lawyerId}`, `/lawyers/${parsedId}`);
+        }
+      }
+    }
+    
+    // Fix staff_id in path
+    const staffIdMatch = config.url.match(/\/api\/lawyers\/staff\/(\d+)/);
+    if (staffIdMatch && staffIdMatch[1]) {
+      const staffId = parseInt(String(staffIdMatch[1]), 10);
+      if (!isNaN(staffId) && staffId > 0) {
+        config.url = config.url.replace(`/staff/${staffIdMatch[1]}`, `/staff/${staffId}`);
+      }
+    }
+    
+    // Fix client_id in path
+    const clientIdMatch = config.url.match(/\/api\/clients\/(\d+)/);
+    if (clientIdMatch && clientIdMatch[1]) {
+      const clientId = parseInt(String(clientIdMatch[1]), 10);
+      if (!isNaN(clientId) && clientId > 0) {
+        config.url = config.url.replace(`/clients/${clientIdMatch[1]}`, `/clients/${clientId}`);
+      }
+    }
+  }
+  
   // Extend timeout for endpoints that may take longer due to slow servers or complex queries
   const slowEndpoints = [
     '/api/chat/query-documents',
     '/api/chat/sessions',
     '/api/chat/sessions/',
+    '/api/chat/support', // Support assistant endpoint
     '/api/lawyers/', // Portfolio and client endpoints
     '/api/clients/', // Client listing endpoints
     '/api/admin/users', // Admin user queries
@@ -61,3 +114,13 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+// Support assistant (public) chat
+export async function supportAssistantChat(payload: {
+  message: string;
+  audience?: 'clients' | 'lawyers' | 'enterprise' | null;
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+}): Promise<string> {
+  const { data } = await api.post('/api/chat/support', payload);
+  return data?.response ?? '';
+}

@@ -58,10 +58,15 @@ export default function ClientCasesPage() {
   };
 
   const fetchLawyer = async () => {
-    if (!currentUser) return;
+    if (!currentUser || !currentUser.id) return;
     
     try {
-      const response = await api.get(`/api/clients/${currentUser.id}/lawyer`);
+      const clientId = parseInt(String(currentUser.id), 10);
+      if (isNaN(clientId)) {
+        console.error('Invalid client ID');
+        return;
+      }
+      const response = await api.get(`/api/clients/${clientId}/lawyer`);
       if (response.data) {
         setLawyer(response.data);
       }

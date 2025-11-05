@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import DocumentEditor from '@/components/DocumentEditor';
 import api from '@/lib/api';
-import { Plus, FileType, Edit, Trash2, Upload, X, Wand2, ChevronRight, MoreVertical, Copy, Download } from 'lucide-react';
+import { Plus, FileType, Edit, Trash2, Upload, X, Wand2, MoreVertical, Copy, Download, Eye, EyeOff } from 'lucide-react';
 import { ToastContainer, useToast } from '@/components/Toast';
 
 interface TemplateField {
@@ -112,12 +112,19 @@ export default function TemplatesPage() {
   const [selectedTemplates, setSelectedTemplates] = useState<number[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const [newTemplate, setNewTemplate] = useState({
     name: '',
     description: '',
     template_content: '',
     category: '',
+    is_public: false,
+  });
+  const [uploadedTemplate, setUploadedTemplate] = useState<Template | null>(null);
+  const [showUploadConfigModal, setShowUploadConfigModal] = useState(false);
+  const [uploadConfig, setUploadConfig] = useState({
+    category: 'other',
+    name: '',
+    description: '',
     is_public: false,
   });
   const { toasts, success, error: showError, warning, info, removeToast } = useToast();
@@ -135,13 +142,22 @@ export default function TemplatesPage() {
   // Close menu on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      const target = event.target as HTMLElement;
+      // Check if click is outside any template menu (button or dropdown)
+      const isClickInsideMenu = target.closest('[data-template-menu]');
+      if (!isClickInsideMenu && templateMenuOpen !== null) {
         setTemplateMenuOpen(null);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    
+    if (templateMenuOpen !== null) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [templateMenuOpen]);
 
   const fetchTemplates = async () => {
     try {
@@ -201,15 +217,26 @@ export default function TemplatesPage() {
     }
   };
 
-  const handleTemplateSelect = (template: Template) => {
+  const handleTemplateSelect = async (template: Template) => {
     setSelectedTemplate(template);
     setShowEditor(false);
     setDocumentContent('');
     setTemplateVariables({});
+    // Fetch template fields when template is selected
+    await fetchTemplateFields(template.id, template.category);
   };
 
   const handleGenerateDocument = async () => {
     if (!selectedTemplate) return;
+    
+    // Validate that required fields are filled
+    const requiredFields = templateFields.filter(f => f.required);
+    const missingFields = requiredFields.filter(f => !templateVariables[f.name] || templateVariables[f.name].trim() === '');
+    
+    if (missingFields.length > 0) {
+      showError(`Please fill in all required fields: ${missingFields.map(f => f.label || f.name).join(', ')}`);
+      return;
+    }
     
     setGenerating(true);
     try {
@@ -218,6 +245,10 @@ export default function TemplatesPage() {
         variables: templateVariables,
         output_format: 'docx'
       });
+      
+      if (!response.data || !response.data.content) {
+        throw new Error('No content received from server');
+      }
       
       // Clean markdown from content before displaying
       let cleanedContent = response.data.content
@@ -235,9 +266,10 @@ export default function TemplatesPage() {
       setDocumentContent(cleanedContent);
       setShowEditor(true);
       success('Document generated successfully! You can now edit it.');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error generating document:', error);
-      showError('Failed to generate document');
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to generate document. Please check your template variables and try again.';
+      showError(errorMessage);
     } finally {
       setGenerating(false);
     }
@@ -300,14 +332,18 @@ export default function TemplatesPage() {
     try {
       await api.delete(`/api/templates/${templateId}`);
       setShowDeleteConfirm(null);
-      fetchTemplates();
+      await fetchTemplates();
       if (selectedTemplate?.id === templateId) {
         setSelectedTemplate(null);
+        setShowEditor(false);
+        setDocumentContent('');
       }
       success('Template deleted successfully');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting template:', error);
-      showError('Failed to delete template');
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to delete template. You may not have permission to delete this template.';
+      showError(errorMessage);
+      setShowDeleteConfirm(null);
     }
   };
 
@@ -378,6 +414,26 @@ export default function TemplatesPage() {
         ? prev.filter(id => id !== templateId)
         : [...prev, templateId]
     );
+  };
+
+  const handleToggleVisibility = async (template: Template) => {
+    try {
+      const newVisibility = !template.is_public;
+      await api.put(`/api/templates/${template.id}`, {
+        is_public: newVisibility,
+      });
+      setTemplateMenuOpen(null);
+      await fetchTemplates();
+      // Update selected template if it's the one being changed
+      if (selectedTemplate?.id === template.id) {
+        setSelectedTemplate({ ...selectedTemplate, is_public: newVisibility });
+      }
+      success(`Template is now ${newVisibility ? 'public' : 'private'}`);
+    } catch (error: any) {
+      console.error('Error toggling template visibility:', error);
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to change template visibility';
+      showError(errorMessage);
+    }
   };
 
   const handleCloneTemplate = async (template: Template) => {
@@ -489,28 +545,76 @@ export default function TemplatesPage() {
   const handleUploadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    
+    setLoading(true);
     const formData = new FormData();
     formData.append('file', file);
+    // Use a default category for initial upload, user will specify later
     const lower = file.name.toLowerCase();
-    const category = lower.includes('contract') ? 'contract' : 
-                     lower.includes('affidavit') ? 'affidavit' : 
-                     lower.includes('mou') ? 'mou' :
-                     lower.includes('notice') ? 'notice' :
-                     lower.includes('policy') ? 'policy' : 'other';
-    formData.append('category', category);
+    const defaultCategory = lower.includes('contract') ? 'contract' : 
+                           lower.includes('affidavit') ? 'affidavit' : 
+                           lower.includes('mou') ? 'mou' :
+                           lower.includes('notice') ? 'notice' :
+                           lower.includes('policy') ? 'policy' : 'other';
+    formData.append('category', defaultCategory);
     formData.append('is_public', 'false');
     formData.append('name', file.name.replace(/\.[^/.]+$/, ''));
     try {
-      await api.post('/api/templates/upload', formData, {
+      const response = await api.post('/api/templates/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      success('Template uploaded successfully');
-      fetchTemplates();
-    } catch (error) {
+      
+      // Show configuration modal with pre-filled data
+      setUploadedTemplate(response.data);
+      setUploadConfig({
+        category: defaultCategory,
+        name: response.data.name || file.name.replace(/\.[^/.]+$/, ''),
+        description: response.data.description || '',
+        is_public: response.data.is_public || false,
+      });
+      setShowUploadConfigModal(true);
+      
+      success('Template uploaded! Please specify the document type.');
+    } catch (error: any) {
       console.error('Error uploading template:', error);
-      showError('Failed to upload template');
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to upload template';
+      showError(errorMessage);
     } finally {
+      setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSaveUploadConfig = async () => {
+    if (!uploadedTemplate || !uploadConfig.name.trim()) return;
+    
+    setLoading(true);
+    try {
+      // Update the template with user-specified configuration
+      const response = await api.put(`/api/templates/${uploadedTemplate.id}`, {
+        category: uploadConfig.category,
+        name: uploadConfig.name,
+        description: uploadConfig.description,
+        is_public: uploadConfig.is_public,
+      });
+      
+      success(`Template configured as ${TEMPLATE_CATEGORIES.find(c => c.id === uploadConfig.category)?.name || uploadConfig.category}. Document fields have been set.`);
+      setShowUploadConfigModal(false);
+      setSelectedCategory(null);
+      await fetchTemplates();
+      
+      // Select and configure the template with appropriate fields based on category
+      if (response.data) {
+        await handleTemplateSelect(response.data);
+      }
+      
+      setUploadedTemplate(null);
+    } catch (error: any) {
+      console.error('Error updating template:', error);
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to update template';
+      showError(errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -544,7 +648,7 @@ export default function TemplatesPage() {
               >
                 ← Back to Templates
               </button>
-              <h1 className="text-3xl font-bold text-secondary-900 dark:text-secondary-100">
+              <h1 className="text-3xl font-bold text-secondary-900 dark:text-secondary-100 truncate" title={selectedTemplate.name}>
                 {selectedTemplate.name}
               </h1>
               <p className="text-secondary-600 dark:text-secondary-400 mt-1">
@@ -641,15 +745,15 @@ export default function TemplatesPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Template Info */}
             <div className="card border-2 border-primary-200 dark:border-primary-800 bg-gradient-to-br from-primary-50/50 to-white dark:from-primary-900/10 dark:to-secondary-800 p-6">
-              <div className="flex items-start justify-between mb-6">
-                <div className="flex items-start space-x-4 flex-1">
+              <div className="flex items-start justify-between mb-6 gap-4">
+                <div className="flex items-start space-x-4 flex-1 min-w-0">
                   <div className="flex-shrink-0">
                     <div className="p-3 rounded-xl bg-primary-100 dark:bg-primary-900/30">
                       <FileType className="h-6 w-6 text-primary-600 dark:text-primary-400" />
                     </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-xl font-bold text-secondary-900 dark:text-secondary-100 mb-2">
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <h3 className="text-xl font-bold text-secondary-900 dark:text-secondary-100 mb-2 truncate" title={selectedTemplate.name}>
                       {selectedTemplate.name}
                     </h3>
                     <div className="flex items-center space-x-3 text-sm">
@@ -998,11 +1102,12 @@ export default function TemplatesPage() {
                   if ((e.target as HTMLElement).closest('[data-template-menu]')) {
                     return;
                   }
-                  // Toggle selection on click, or open template if double-clicked
-                  if (e.detail === 2) {
-                    handleTemplateSelect(template);
-                  } else {
+                  // Single click selects/opens the template
+                  // Ctrl+Click for multi-select (optional)
+                  if (e.ctrlKey || e.metaKey) {
                     toggleTemplateSelection(template.id);
+                  } else {
+                    handleTemplateSelect(template);
                   }
                 }}
                 className={`card hover-lift hover-glow transition-all duration-300 cursor-pointer animate-fade-in-up p-6 ${
@@ -1020,7 +1125,7 @@ export default function TemplatesPage() {
                       </div>
                     </div>
                     <div className="ml-4 flex-1 min-w-0">
-                      <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 truncate mb-2">
+                      <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 truncate mb-2" title={template.name}>
                         {template.name}
                       </h3>
                       <div className="flex items-center space-x-2">
@@ -1071,7 +1176,26 @@ export default function TemplatesPage() {
                             >
                               <Copy className="h-4 w-4" />
                               Clone
-                    </button>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleVisibility(template);
+                              }}
+                              className="w-full px-4 py-2 text-left text-sm text-secondary-700 dark:text-secondary-300 hover:bg-secondary-100 dark:hover:bg-secondary-700 rounded-lg flex items-center gap-2"
+                            >
+                              {template.is_public ? (
+                                <>
+                                  <EyeOff className="h-4 w-4" />
+                                  Make Private
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="h-4 w-4" />
+                                  Make Public
+                                </>
+                              )}
+                            </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1087,7 +1211,6 @@ export default function TemplatesPage() {
                         </div>
                       )}
                     </div>
-                    <ChevronRight className="h-5 w-5 text-secondary-400 flex-shrink-0 ml-2" />
                   </div>
                 </div>
                 
@@ -1142,6 +1265,44 @@ export default function TemplatesPage() {
           </div>
         )}
 
+        {/* Single Template Delete Confirmation Modal */}
+        {showDeleteConfirm !== null && (() => {
+          const templateToDelete = templates.find(t => t.id === showDeleteConfirm);
+          return (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-secondary-800 rounded-lg shadow-xl max-w-md w-full p-6 animate-fade-in-up">
+                <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 mb-4">
+                  Delete Template?
+                </h3>
+                <p className="text-sm text-secondary-700 dark:text-secondary-300 mb-2">
+                  This action cannot be undone. You are about to delete:
+                </p>
+                {templateToDelete && (
+                  <div className="mb-4 p-3 bg-secondary-50 dark:bg-secondary-900/50 rounded-lg border border-secondary-200 dark:border-secondary-700">
+                    <p className="text-sm font-medium text-secondary-900 dark:text-secondary-100 truncate" title={templateToDelete.name}>
+                      {templateToDelete.name}
+                    </p>
+                  </div>
+                )}
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    onClick={() => setShowDeleteConfirm(null)}
+                    className="btn-secondary btn-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTemplate(showDeleteConfirm)}
+                    className="btn-destructive btn-sm"
+                  >
+                    Delete Template
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Bulk Delete Confirmation Modal */}
         {showBulkDeleteConfirm && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1170,6 +1331,111 @@ export default function TemplatesPage() {
           </div>
         )}
       </div>
+      
+      {/* Upload Configuration Modal */}
+      {showUploadConfigModal && uploadedTemplate && (
+        <div className="modal-overlay" onClick={() => setShowUploadConfigModal(false)}>
+          <div className="modal-container max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="flex items-center justify-between">
+                <h3 className="modal-title">Configure Uploaded Template</h3>
+                <button
+                  onClick={() => {
+                    setShowUploadConfigModal(false);
+                    setUploadedTemplate(null);
+                  }}
+                  className="btn-ghost btn-xs p-1.5"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="modal-body">
+              <p className="text-sm text-secondary-600 dark:text-secondary-400 mb-4">
+                Specify the document type to automatically configure the information fields that will be used when generating documents from this template.
+              </p>
+              <form onSubmit={(e) => { e.preventDefault(); handleSaveUploadConfig(); }} className="space-y-4">
+                <div className="form-group">
+                  <label className="label-required">Document Type</label>
+                  <select
+                    className="input"
+                    value={uploadConfig.category}
+                    onChange={(e) => setUploadConfig({ ...uploadConfig, category: e.target.value })}
+                    required
+                  >
+                    {TEMPLATE_CATEGORIES.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name} - {cat.description}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">
+                    This determines which fields will be available when generating documents
+                  </p>
+                </div>
+                
+                <div className="form-group">
+                  <label className="label-required">Template Name</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={uploadConfig.name}
+                    onChange={(e) => setUploadConfig({ ...uploadConfig, name: e.target.value })}
+                    placeholder="Enter template name"
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="label">Description</label>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={uploadConfig.description}
+                    onChange={(e) => setUploadConfig({ ...uploadConfig, description: e.target.value })}
+                    placeholder="Optional description of what this template is used for..."
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={uploadConfig.is_public}
+                      onChange={(e) => setUploadConfig({ ...uploadConfig, is_public: e.target.checked })}
+                      className="rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-sm text-secondary-700 dark:text-secondary-300">
+                      Make this template public (visible to all users)
+                    </span>
+                  </label>
+                </div>
+                
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUploadConfigModal(false);
+                      setUploadedTemplate(null);
+                    }}
+                    className="btn-secondary btn-md"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary btn-md"
+                    disabled={loading || !uploadConfig.name.trim()}
+                  >
+                    {loading ? 'Saving...' : 'Save & Continue'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </DashboardLayout>
   );

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import WelcomeGuide from '@/components/WelcomeGuide';
 import { 
   Scale, 
   FileText, 
@@ -115,6 +116,8 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-background dark:to-accent-950">
+      {/* Support assistant - visible on landing page */}
+      <WelcomeGuide storageKey="lega_has_seen_welcome_v2" />
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 dark:bg-secondary-900/80 backdrop-blur-md border-b border-secondary-200 dark:border-secondary-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

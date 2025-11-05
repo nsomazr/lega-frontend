@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { ToastContainer, useToast } from '@/components/Toast';
 import api from '@/lib/api';
@@ -33,6 +33,7 @@ export default function LawyerPortfolioPage() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const fetchingRef = useRef(false);
   
   const { toasts, error: showError, removeToast } = useToast();
 
@@ -41,34 +42,97 @@ export default function LawyerPortfolioPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      fetchPortfolio();
+    if (currentUser && currentUser.id) {
+      // Only fetch if we have a valid numeric ID
+      const idStr = String(currentUser.id).trim();
+      const parsedId = parseInt(idStr, 10);
+      if (!isNaN(parsedId) && parsedId > 0) {
+        fetchPortfolio();
+      } else {
+        console.warn('Skipping portfolio fetch - invalid user ID:', currentUser.id);
+      }
     }
   }, [currentUser]);
 
   const fetchCurrentUser = async () => {
     try {
       const response = await api.get('/api/auth/me');
-      setCurrentUser(response.data);
-      if (!isLawyerOrAdmin(response.data.role)) {
+      const userData = response.data;
+      if (!isLawyerOrAdmin(userData?.role)) {
         window.location.href = '/dashboard';
+        return;
       }
+      // Validate user ID before setting
+      if (userData?.id !== undefined && userData?.id !== null) {
+        const idStr = String(userData.id).trim();
+        const parsedId = parseInt(idStr, 10);
+        if (isNaN(parsedId) || parsedId <= 0) {
+          console.error('Invalid user ID from API:', userData.id);
+          showError('Invalid user data. Please log out and log back in.');
+          return;
+        }
+      }
+      setCurrentUser(userData);
     } catch (error) {
       showError('Failed to fetch user information');
     }
   };
 
   const fetchPortfolio = async () => {
-    if (!currentUser) return;
+    // Prevent duplicate calls
+    if (fetchingRef.current) {
+      console.log('Portfolio fetch already in progress, skipping...');
+      return;
+    }
     
+    // Capture currentUser at the start to avoid race conditions
+    const user = currentUser;
+    if (!user || user.id === undefined || user.id === null) {
+      console.log('No user or user ID, skipping portfolio fetch');
+      return;
+    }
+    
+    // Convert to string first, then parse to ensure we handle all types
+    const idStr = String(user.id).trim();
+    if (!idStr || idStr === 'undefined' || idStr === 'null' || idStr === '') {
+      console.warn('Invalid lawyer ID string:', user.id, '->', idStr);
+      return;
+    }
+    
+    const lawyerId = parseInt(idStr, 10);
+    if (isNaN(lawyerId) || lawyerId <= 0 || !Number.isInteger(lawyerId)) {
+      console.error('Invalid lawyer ID - could not parse:', user.id, 'as string:', idStr, 'parsed:', lawyerId);
+      return; // Don't show error, just silently skip
+    }
+    
+    // Final validation - ensure it's a proper number
+    if (typeof lawyerId !== 'number' || !Number.isFinite(lawyerId) || lawyerId <= 0) {
+      console.error('Aborting API call - invalid lawyerId type/value:', lawyerId, typeof lawyerId);
+      return;
+    }
+    
+    fetchingRef.current = true;
+    setLoading(true);
     try {
-      const lawyerId = currentUser.id;
-      const response = await api.get(`/api/lawyers/${lawyerId}/portfolio`);
+      // Ensure we're using a number, not a string
+      const url = `/api/lawyers/${Number(lawyerId)}/portfolio`;
+      console.log('Fetching portfolio:', url, 'lawyerId:', lawyerId, 'type:', typeof lawyerId);
+      const response = await api.get(url);
       setPortfolio(response.data);
     } catch (error: any) {
-      showError('Failed to fetch portfolio');
+      console.error('Error fetching portfolio:', error);
+      // Only show error if it's not a validation error (422)
+      // Validation errors mean we somehow passed an invalid ID despite checks
+      if (error?.response?.status === 422) {
+        console.error('VALIDATION ERROR: Invalid lawyer_id passed to API despite validation. ID was:', lawyerId, 'type:', typeof lawyerId);
+        // Don't show error to user - this is a code bug
+      } else {
+        const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to fetch portfolio';
+        showError(errorMessage);
+      }
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
     }
   };
 

@@ -6,6 +6,7 @@ import { ToastContainer, useToast } from '@/components/Toast';
 import api from '@/lib/api';
 import { Plus, Search, Edit, Trash2, Users, UserPlus, CheckCircle, XCircle } from 'lucide-react';
 import { isLawyerOrAdmin } from '@/lib/roleCheck';
+import { formatApiError } from '@/lib/errorUtils';
 
 interface Staff {
   id: number;
@@ -61,14 +62,17 @@ export default function LawyerStaffPage() {
       // Filter by search term if provided
       const filtered = searchTerm
         ? allStaff.filter((s: Staff) =>
-            s.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            s.username.toLowerCase().includes(searchTerm.toLowerCase())
+            s.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            s.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            s.username?.toLowerCase().includes(searchTerm.toLowerCase())
           )
         : allStaff;
       setStaff(filtered);
     } catch (error: any) {
-      showError('Failed to fetch staff members');
+      console.error('Error fetching staff:', error);
+      const errorMessage = formatApiError(error, 'Failed to fetch staff members');
+      showError(errorMessage);
+      setStaff([]);
     } finally {
       setLoading(false);
     }
@@ -108,7 +112,7 @@ export default function LawyerStaffPage() {
       fetchStaff();
       success('Staff member created successfully');
     } catch (error: any) {
-      showError(error.response?.data?.detail || 'Failed to create staff member');
+      showError(formatApiError(error, 'Failed to create staff member'));
     } finally {
       setCreating(false);
     }
@@ -137,41 +141,58 @@ export default function LawyerStaffPage() {
       };
       
       // Password update requires admin endpoint
+      const staffId = parseInt(String(showEdit.id), 10);
+      if (isNaN(staffId)) {
+        showError('Invalid staff ID');
+        return;
+      }
       if (form.password) {
-        await api.put(`/api/admin/users/${showEdit.id}`, { ...updateData, password: form.password });
+        await api.put(`/api/admin/users/${staffId}`, { ...updateData, password: form.password });
       } else {
-        await api.put(`/api/lawyers/staff/${showEdit.id}`, updateData);
+        await api.put(`/api/lawyers/staff/${staffId}`, updateData);
       }
       setShowEdit(null);
       fetchStaff();
       success('Staff member updated successfully');
     } catch (error: any) {
-      showError(error.response?.data?.detail || 'Failed to update staff member');
+      showError(formatApiError(error, 'Failed to update staff member'));
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!showDelete.user) return;
+    if (!showDelete.user || !showDelete.user.id) return;
     
     try {
-      await api.delete(`/api/lawyers/staff/${showDelete.user.id}`);
+      const staffId = parseInt(String(showDelete.user.id), 10);
+      if (isNaN(staffId)) {
+        showError('Invalid staff ID');
+        return;
+      }
+      await api.delete(`/api/lawyers/staff/${staffId}`);
       setShowDelete({ open: false, user: null });
       fetchStaff();
       success('Staff member deleted successfully');
     } catch (error: any) {
-      showError(error.response?.data?.detail || 'Failed to delete staff member');
+      showError(formatApiError(error, 'Failed to delete staff member'));
     }
   };
 
   const toggleStaffStatus = async (staffMember: Staff) => {
+    if (!staffMember.id) return;
+    
     try {
-      await api.put(`/api/admin/users/${staffMember.id}`, { is_active: !staffMember.is_active });
+      const staffId = parseInt(String(staffMember.id), 10);
+      if (isNaN(staffId)) {
+        showError('Invalid staff ID');
+        return;
+      }
+      await api.put(`/api/admin/users/${staffId}`, { is_active: !staffMember.is_active });
       fetchStaff();
       success(`Staff member ${staffMember.is_active ? 'suspended' : 'reactivated'} successfully`);
     } catch (error: any) {
-      showError(error.response?.data?.detail || 'Failed to update staff status');
+      showError(formatApiError(error, 'Failed to update staff status'));
     }
   };
 
