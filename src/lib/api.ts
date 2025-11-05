@@ -7,10 +7,10 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 5000, // 5 seconds timeout - fail faster
+  timeout: 30000, // 30 seconds default timeout - increased for slower servers
 });
 
-// Add auth token to requests
+// Add auth token to requests and extend timeout for chat/AI endpoints
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('access_token');
@@ -18,6 +18,23 @@ api.interceptors.request.use((config) => {
       config.headers.Authorization = `Bearer ${token}`;
     }
   }
+  
+  // Extend timeout for chat/AI endpoints that may take longer
+  const chatEndpoints = [
+    '/api/chat/query-documents',
+    '/api/chat/sessions',
+    '/api/chat/sessions/',
+  ];
+  
+  const isChatEndpoint = chatEndpoints.some(endpoint => 
+    config.url?.includes(endpoint)
+  );
+  
+  // If it's a chat endpoint and no custom timeout is set, use 120 seconds (2 minutes)
+  if (isChatEndpoint && !config.timeout) {
+    config.timeout = 120000; // 2 minutes for AI/chat requests
+  }
+  
   return config;
 });
 

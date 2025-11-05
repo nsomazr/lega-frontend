@@ -1322,8 +1322,8 @@ function ChatContent() {
                   </div>
                 )}
                 
-                <div className="space-y-2">
-                  {/* Model selector - above input on mobile, inside on desktop */}
+                <div className="flex flex-col space-y-3">
+                  {/* Model selector - moved above input on mobile, inline on desktop */}
                   <div className="flex items-center gap-2 sm:hidden">
                     <span className="text-xs text-secondary-500 dark:text-secondary-400 font-medium whitespace-nowrap">Model:</span>
                     <select
@@ -1338,8 +1338,9 @@ function ChatContent() {
                       ))}
                     </select>
                   </div>
-                  <div className="relative flex-1 w-full">
-                    {/* Model selector - inside input on desktop */}
+                  
+                  <div className="relative flex-1">
+                    {/* Model selector inside input (left side) - hidden on mobile, visible on desktop */}
                     <div className="hidden sm:flex absolute left-3 items-center gap-2 z-10" style={{ top: '50%', transform: 'translateY(-50%)' }}>
                       <span className="text-xs text-secondary-500 dark:text-secondary-400 font-medium whitespace-nowrap">Model:</span>
                       <select
@@ -1359,7 +1360,7 @@ function ChatContent() {
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyPress={handleKeyPress}
                       placeholder={documentId ? "Ask a question about this document..." : "Ask me anything..."}
-                      className="w-full pl-4 sm:pl-[240px] pr-20 sm:pr-36 py-4 border border-secondary-300 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none bg-white dark:bg-secondary-800 shadow-sm transition-all duration-200 placeholder-secondary-400 dark:placeholder-secondary-500 text-sm text-secondary-900 dark:text-secondary-100"
+                      className="w-full sm:pl-[240px] pl-4 sm:pr-36 pr-28 border border-secondary-300 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none bg-white dark:bg-secondary-800 shadow-sm transition-all duration-200 placeholder-secondary-400 dark:placeholder-secondary-500 text-sm text-secondary-900 dark:text-secondary-100"
                       rows={2}
                       disabled={sending}
                       style={{ 
@@ -1368,8 +1369,9 @@ function ChatContent() {
                         lineHeight: '1.8'
                       }}
                     />
-                    {/* Inline actions inside the input (right side) */}
+                    {/* Inline actions inside the input (right side) - responsive spacing */}
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      {/* Mobile: Only show send button, desktop: show all buttons */}
                       {currentUser?.role === 'client' && (
                         <>
                           <input
@@ -1383,7 +1385,7 @@ function ChatContent() {
                           <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={uploadingFile}
-                            className="p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="hidden sm:flex p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Upload document"
                             aria-label="Upload document"
                           >
@@ -1394,7 +1396,7 @@ function ChatContent() {
                       <button
                         onClick={handleCopyInput}
                         disabled={!newMessage.trim()}
-                        className="p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="hidden sm:flex p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Copy message"
                         aria-label="Copy message"
                       >
@@ -1403,21 +1405,21 @@ function ChatContent() {
                       <button
                         onClick={handleClearInput}
                         disabled={!newMessage.trim()}
-                        className="p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed hidden sm:flex"
+                        className="hidden sm:flex p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Clear message"
                         aria-label="Clear message"
                       >
                         <X className="h-4 w-4 text-secondary-500 dark:text-secondary-400" />
                       </button>
-                  <button
-                    onClick={() => (sending ? handleStop() : sendMessage(newMessage))}
-                    disabled={!newMessage.trim() && !sending}
-                        className={`px-2 sm:px-3 h-8 sm:h-9 rounded-md shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center ${sending ? 'bg-secondary-600 text-white hover:bg-secondary-700' : 'bg-primary-600 hover:bg-primary-700 text-white'}`}
+                      <button
+                        onClick={() => (sending ? handleStop() : sendMessage(newMessage))}
+                        disabled={!newMessage.trim() && !sending}
+                        className={`ml-1 px-3 sm:px-3 h-9 rounded-md shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center ${sending ? 'bg-secondary-600 text-white hover:bg-secondary-700' : 'bg-primary-600 hover:bg-primary-700 text-white'}`}
                         title={sending ? 'Pause' : 'Send'}
                         aria-label={sending ? 'Pause' : 'Send'}
-                  >
+                      >
                         {sending ? <Pause className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-                  </button>
+                      </button>
                     </div>
                   </div>
                 </div>

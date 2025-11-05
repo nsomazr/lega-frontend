@@ -190,8 +190,8 @@ export default function Sidebar({ user, collapsed = false }: SidebarProps) {
   }
 
   return (
-    <div className={`hidden md:flex md:flex-col transition-all duration-300 ease-in-out h-screen sticky top-0 ${
-      collapsed ? 'md:w-16' : 'md:w-64'
+    <div className={`flex flex-col transition-all duration-300 ease-in-out h-screen sticky top-0 ${
+      collapsed ? 'w-16' : 'w-64'
     }`}>
       <div className="flex flex-col h-full bg-white/50 dark:bg-secondary-800/50 backdrop-blur-sm border-r border-secondary-200 dark:border-secondary-700">
         {/* Logo Section */}
