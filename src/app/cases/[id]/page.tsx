@@ -1379,7 +1379,7 @@ export default function CaseDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2">Notes</label>
-                  <textarea className="input" rows={3} value={participantForm.notes} onChange={(e) => setParticipantForm({...participantForm, notes: e.target.value})} />
+                  <textarea className="input" rows={3} value={participantForm.notes} onChange={(e) => setParticipantForm({...participantForm, notes: e.target.value})} spellCheck={typeof window !== 'undefined' ? (localStorage.getItem('enable_autocorrect') === 'true') : false} />
                 </div>
                 <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200 dark:border-secondary-700">
                   <button type="button" onClick={() => { setShowParticipantModal(false); setEditingParticipant(null); setParticipantForm({ participant_type: 'lawyer', name: '', email: '', phone: '', role: '', organization: '', notes: '' }); }} className="btn-secondary btn-md">Cancel</button>
@@ -1414,7 +1414,7 @@ export default function CaseDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2">Description</label>
-                  <textarea className="input" rows={3} value={eventForm.description} onChange={(e) => setEventForm({...eventForm, description: e.target.value})} />
+                  <textarea className="input" rows={3} value={eventForm.description} onChange={(e) => setEventForm({...eventForm, description: e.target.value})} spellCheck={typeof window !== 'undefined' ? (localStorage.getItem('enable_autocorrect') === 'true') : false} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -1459,7 +1459,7 @@ export default function CaseDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2">Description</label>
-                  <textarea className="input" rows={3} value={dateForm.description} onChange={(e) => setDateForm({...dateForm, description: e.target.value})} />
+                  <textarea className="input" rows={3} value={dateForm.description} onChange={(e) => setDateForm({...dateForm, description: e.target.value})} spellCheck={typeof window !== 'undefined' ? (localStorage.getItem('enable_autocorrect') === 'true') : false} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -1503,7 +1503,7 @@ export default function CaseDetailPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2">Content *</label>
-                  <textarea className="input" rows={6} required value={noteForm.content} onChange={(e) => setNoteForm({...noteForm, content: e.target.value})} />
+                  <textarea className="input" rows={6} required value={noteForm.content} onChange={(e) => setNoteForm({...noteForm, content: e.target.value})} spellCheck={typeof window !== 'undefined' ? (localStorage.getItem('enable_autocorrect') === 'true') : false} />
                 </div>
                 <div className="flex justify-end gap-3 pt-4 border-t border-secondary-200 dark:border-secondary-700">
                   <button type="button" onClick={() => { setShowNoteModal(false); setEditingNote(null); }} className="btn-secondary btn-md">Cancel</button>
@@ -1807,11 +1807,39 @@ export default function CaseDetailPage() {
                     value={transferForm.transfer_notes}
                     onChange={(e) => setTransferForm({ ...transferForm, transfer_notes: e.target.value })}
                     placeholder="Optional notes about the transfer..."
+                    spellCheck={typeof window !== 'undefined' ? (localStorage.getItem('enable_autocorrect') === 'true') : false}
                   />
                 </div>
-                <div className="flex gap-3 justify-end">
-                  <button type="button" onClick={() => setShowTransferModal(false)} className="btn-secondary btn-md">Cancel</button>
-                  <button type="submit" className="btn-primary btn-md">Transfer Case</button>
+                <div className="flex gap-3 justify-between items-center">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const response = await api.get(`/api/cases/${id}/download`, {
+                          responseType: 'blob'
+                        });
+                        const blob = new Blob([response.data], { type: 'application/json' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.setAttribute('download', `case_${caseData?.case_number || id}_data.json`);
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        window.URL.revokeObjectURL(url);
+                        success('Case data downloaded');
+                      } catch (error: any) {
+                        showError(error.response?.data?.detail || 'Failed to download case data');
+                      }
+                    }}
+                    className="btn-secondary btn-md flex items-center gap-2"
+                  >
+                    <Download className="h-4 w-4" /> Download Case Data
+                  </button>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setShowTransferModal(false)} className="btn-secondary btn-md">Cancel</button>
+                    <button type="submit" className="btn-primary btn-md">Transfer Case</button>
+                  </div>
                 </div>
               </form>
             </div>

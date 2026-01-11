@@ -156,6 +156,17 @@ body {
     @apply flex h-10 w-full rounded-lg border border-secondary-300 bg-white px-3 py-2 text-sm placeholder:text-secondary-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200 dark:border-secondary-600 dark:bg-secondary-800 dark:text-secondary-100 dark:placeholder:text-secondary-400;
   }
 
+  /* Spell-check styling for autocorrection */
+  input[spellcheck="true"]:invalid,
+  textarea[spellcheck="true"]:invalid,
+  input[spellcheck="true"]:not(:focus):invalid,
+  textarea[spellcheck="true"]:not(:focus):invalid {
+    text-decoration-line: underline;
+    text-decoration-color: rgb(239, 68, 68);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 2px;
+  }
+
   .input-error {
     @apply border-error-500 focus-visible:ring-error-500;
   }

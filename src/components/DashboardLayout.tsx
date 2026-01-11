@@ -7,6 +7,8 @@ import api from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import { X } from 'lucide-react';
+import { isSessionExpiredShown, markSessionExpired, isRedirectInProgress, setRedirectInProgress, resetSessionState } from '@/lib/sessionManager';
+import ProfileCompletionModal from '@/components/ProfileCompletionModal';
 
 interface User {
   id: number;
@@ -25,6 +27,7 @@ export default function DashboardLayout({
 }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('sidebarCollapsed') === 'true';
@@ -40,7 +43,7 @@ export default function DashboardLayout({
     
     const token = localStorage.getItem('access_token');
     if (!token) {
-      router.push('/login');
+        router.push('/auth');
       return;
     }
 
@@ -66,9 +69,13 @@ export default function DashboardLayout({
         // Remove token on any error
         if (error.response?.status === 401 || error.response?.status === 403) {
           localStorage.removeItem('access_token');
-          // Only redirect if we're not already on login page
-          if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-            router.push('/login?message=Please sign in to continue');
+          // Only redirect if we're not already on login page and session expiration not already handled
+          if (typeof window !== 'undefined' && !window.location.pathname.includes('/auth')) {
+            if (!isSessionExpiredShown() && !isRedirectInProgress()) {
+              markSessionExpired();
+              setRedirectInProgress(true);
+              router.push('/auth?message=Session expired. Please sign in again.');
+            }
           }
         }
       }
@@ -80,36 +87,56 @@ export default function DashboardLayout({
     return () => clearTimeout(timeoutId);
   }, [router]);
 
-  // Check if profile is complete and redirect if needed
+  // Check if profile is complete and show modal if needed
   useEffect(() => {
     if (!loading && user && typeof window !== 'undefined') {
-      // Check if profile is incomplete (missing full_name, username, or phone)
-      const isProfileIncomplete = !user.full_name || !user.username || !user.phone;
+      // Check if profile is incomplete (missing full_name or username)
+      // Phone is optional in the new onboarding flow, so we don't require it
+      const isProfileIncomplete = !user.full_name || !user.username;
       
       // Get current pathname
       const currentPath = window.location.pathname;
       
-      // Don't redirect if already on profile completion page
-      if (isProfileIncomplete && currentPath !== '/profile/complete') {
-        router.push('/profile/complete');
-      }
-      // If profile is complete and we're on the completion page, redirect to dashboard
-      else if (!isProfileIncomplete && currentPath === '/profile/complete') {
-        router.push('/dashboard');
+      // Don't show modal if already on onboarding or profile completion pages
+      if (isProfileIncomplete && !currentPath.includes('/auth/onboarding') && currentPath !== '/profile/complete') {
+        // Check if user has a placeholder name (indicating they're in onboarding flow)
+        const hasPlaceholderName = user.full_name && (user.full_name.startsWith('User ') || user.full_name.includes('@'));
+        if (hasPlaceholderName) {
+          // Redirect to onboarding for new users
+          router.push('/auth/onboarding');
+        } else {
+          // Show modal for existing users with incomplete profiles
+          setShowProfileModal(true);
+        }
+      } else {
+        // Hide modal if profile is complete or on onboarding pages
+        setShowProfileModal(false);
       }
     }
   }, [loading, user, router]);
+
+  // Refresh user data after profile completion
+  const refreshUser = async () => {
+    try {
+      const response = await api.get('/api/auth/me');
+      setUser(response.data);
+      setShowProfileModal(false);
+    } catch (error) {
+      console.error('Failed to refresh user data:', error);
+    }
+  };
 
   // Redirect to login if no user after loading completes
   // This MUST be called before any conditional returns (React hooks rule)
   useEffect(() => {
     if (!loading && !user) {
-      router.push('/login');
+        router.push('/auth');
     }
   }, [loading, user, router]);
 
   // Check if profile is incomplete (for redirect logic)
-  const isProfileIncomplete = user && (!user.full_name || !user.username || !user.phone);
+  // Phone is optional in the new onboarding flow, so we don't require it
+  const isProfileIncomplete = user && (!user.full_name || !user.username);
   const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
 
   // Early returns after all hooks
@@ -142,8 +169,9 @@ export default function DashboardLayout({
     );
   }
 
-  // Don't render layout if profile is incomplete and not already on completion page
-  if (isProfileIncomplete && currentPath !== '/profile/complete') {
+  // Don't render layout if profile is incomplete and user is being redirected to onboarding
+  const isRedirectingToOnboarding = user && !user.full_name && currentPath.includes('/auth/onboarding');
+  if (isRedirectingToOnboarding) {
     return null; // Will be redirected by useEffect
   }
 
@@ -189,6 +217,15 @@ export default function DashboardLayout({
           </main>
         </div>
       </div>
+      
+      {/* Profile Completion Modal */}
+      {showProfileModal && user && (
+        <ProfileCompletionModal
+          user={user}
+          onComplete={refreshUser}
+          onClose={() => setShowProfileModal(false)}
+        />
+      )}
     </div>
   );
 }

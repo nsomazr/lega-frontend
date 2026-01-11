@@ -140,13 +140,7 @@ export default function LandingPage() {
               ) : (
                 <>
                   <Link
-                    href="/login"
-                    className="btn-ghost btn-sm"
-                  >
-                    Sign In
-                  </Link>
-                  <Link
-                    href="/register"
+                    href="/auth"
                     className="btn-primary btn-sm"
                   >
                     Get Started
@@ -178,7 +172,7 @@ export default function LandingPage() {
             {!token && (
               <>
                 <Link
-                  href="/register"
+                  href="/auth"
                   className="btn-primary btn-lg group"
                 >
                   Start Free Trial
@@ -401,7 +395,7 @@ export default function LandingPage() {
             </p>
             {!token && (
               <Link
-                href="/register"
+                href="/auth"
                 className="btn-secondary btn-lg inline-flex items-center group bg-white text-primary-600 hover:bg-secondary-50"
               >
                 Get Started Free

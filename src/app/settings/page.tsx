@@ -55,6 +55,10 @@ export default function SettingsPage() {
         email: response.data.email,
         username: response.data.username,
       });
+      // Store autocorrection preference
+      if (response.data.enable_autocorrect !== undefined) {
+        localStorage.setItem('enable_autocorrect', String(response.data.enable_autocorrect));
+      }
     } catch (error) {
       console.error('Error fetching user:', error);
     } finally {
@@ -71,14 +75,33 @@ export default function SettingsPage() {
         full_name: userForm.full_name,
         email: userForm.email,
         username: userForm.username,
+        enable_autocorrect: user?.enable_autocorrect ?? false,
       });
       setUser(res.data);
+      // Update localStorage
+      if (res.data.enable_autocorrect !== undefined) {
+        localStorage.setItem('enable_autocorrect', String(res.data.enable_autocorrect));
+      }
       success('Profile updated successfully');
     } catch (error) {
       console.error('Error updating profile:', error);
       showError('Failed to update profile');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleToggleAutocorrect = async (enabled: boolean) => {
+    try {
+      const res = await api.put('/api/auth/me', {
+        enable_autocorrect: enabled,
+      });
+      setUser(res.data);
+      localStorage.setItem('enable_autocorrect', String(enabled));
+      success(`Autocorrection ${enabled ? 'enabled' : 'disabled'}`);
+    } catch (error) {
+      console.error('Error updating autocorrection setting:', error);
+      showError('Failed to update autocorrection setting');
     }
   };
 
@@ -176,6 +199,37 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </form>
+              </div>
+            </div>
+
+            {/* Autocorrection Settings */}
+            <div className="card hover-lift">
+              <div className="p-6">
+                <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 mb-6 px-2 flex items-center gap-2">
+                  <Zap className="h-5 w-5 text-primary-500" />
+                  Writing & Autocorrection
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-secondary-50 dark:bg-secondary-800/50 rounded-lg">
+                    <div className="flex-1">
+                      <h4 className="text-sm font-medium text-secondary-900 dark:text-secondary-100 mb-1">
+                        Enable Autocorrection
+                      </h4>
+                      <p className="text-xs text-secondary-600 dark:text-secondary-400">
+                        Show red underlines for misspelled words in all typing areas
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={user?.enable_autocorrect ?? false}
+                        onChange={(e) => handleToggleAutocorrect(e.target.checked)}
+                      />
+                      <div className="w-11 h-6 bg-secondary-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-secondary-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-secondary-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-secondary-600 peer-checked:bg-primary-600"></div>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
 

@@ -8,9 +8,11 @@ import { ToastContainer, useToast } from '@/components/Toast';
 import api from '@/lib/api';
 import { LawyerRecommendation } from '@/components/LawyerRecommendation';
 import { useRouter } from 'next/navigation';
+import { useAutocorrect } from '@/lib/useAutocorrect';
 import { 
   Send, 
   ArrowLeft, 
+  ArrowUp,
   FileText, 
   MessageCircle, 
   Copy, 
@@ -30,7 +32,10 @@ import {
   ArchiveRestore,
   Gavel,
   Upload,
-  Users
+  Users,
+  Search,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface ChatSession {
@@ -60,6 +65,7 @@ function ChatContent() {
   const router = useRouter();
   const documentId = searchParams.get('documentId');
   const documentName = searchParams.get('documentName');
+  const autocorrectEnabled = useAutocorrect();
   
   const [document, setDocument] = useState<Document | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -69,6 +75,8 @@ function ChatContent() {
   const [selectedDocuments, setSelectedDocuments] = useState<number[]>([]); // Max 3
   const [selectedCase, setSelectedCase] = useState<number | null>(null); // Max 1
   const [useTanzLii, setUseTanzLii] = useState(false);
+  const [useWebSearch, setUseWebSearch] = useState(false);
+  const [showModeSelector, setShowModeSelector] = useState(false); // Toggle between web search and file upload
   const [allDocuments, setAllDocuments] = useState<any[]>([]);
   const [allCases, setAllCases] = useState<any[]>([]);
   const [showDocumentSelector, setShowDocumentSelector] = useState(false);
@@ -87,17 +95,14 @@ function ChatContent() {
   const [archivedIds, setArchivedIds] = useState<string[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [contextSectionExpanded, setContextSectionExpanded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Response style/tone removed from UI and requests
   // Models fetched from backend (fallback includes Default)
-  const [modelOptions, setModelOptions] = useState<{ value: string; label: string }[]>([
-    { value: 'default', label: 'Default' },
-  ]);
-  const [model, setModel] = useState<string>(() => {
-    try { return localStorage.getItem('chat_model') || 'default'; } catch { return 'default'; }
-  });
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedImageBase64, setUploadedImageBase64] = useState<string | null>(null);
   const { toasts, success, error: showError, warning, info, removeToast } = useToast();
 
   useEffect(() => {
@@ -146,7 +151,58 @@ function ChatContent() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check if it's an image or document
+    const isImage = file.type.startsWith('image/');
+    const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/jpg'];
+    const allowedDocTypes = ['.pdf', '.doc', '.docx', '.txt', '.csv', '.xls', '.xlsx', '.md', '.json', '.xml'];
+    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
+    
+    if (!isImage && !allowedDocTypes.includes(fileExt)) {
+      showError('Please upload an image (JPEG, PNG, GIF, WebP) or document (PDF, DOC, DOCX, TXT, etc.)');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    if (isImage && !allowedImageTypes.includes(file.type)) {
+      showError('Please upload a valid image file (JPEG, PNG, GIF, WebP)');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
     setUploadingFile(true);
+    
+    // For images, convert to base64 and store
+    if (isImage) {
+      try {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64String = (reader.result as string).split(',')[1]; // Remove data:image/...;base64, prefix
+          setUploadedImageBase64(base64String);
+          setUploadedFile(file);
+          setUploadingFile(false);
+          success(`Image "${file.name}" ready to send with your message`);
+        };
+        reader.onerror = () => {
+          showError('Failed to read image file');
+          setUploadingFile(false);
+        };
+        reader.readAsDataURL(file);
+        return; // Early return, cleanup happens in reader callbacks
+      } catch (error: any) {
+        showError('Failed to process image');
+        setUploadingFile(false);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+    }
+    
+    // For documents, upload them to the document system
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -158,17 +214,15 @@ function ChatContent() {
       const uploadedDoc = response.data;
       const newSelected = [...selectedDocuments, uploadedDoc.id].slice(0, 3);
       setSelectedDocuments(newSelected);
-      // Refresh all documents to include the new one
       await fetchAllDocuments();
       success(`Document "${uploadedDoc.original_filename}" uploaded and selected`);
-      
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     } catch (error: any) {
       showError(error.response?.data?.detail || 'Failed to upload document');
     } finally {
       setUploadingFile(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -203,22 +257,6 @@ function ChatContent() {
     }
   }, [menuOpenId]);
 
-  // Fetch available models for dropdown
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const res = await api.get('/api/chat/models');
-        // Use exact backend names as labels to match availability precisely
-        const items = (res.data?.models || []).map((m: any) => ({ value: m.name, label: m.name }));
-        if (Array.isArray(items) && items.length > 0) {
-          setModelOptions([{ value: 'default', label: 'Default' }, ...items]);
-        }
-      } catch (e) {
-        // keep default only on failure
-      }
-    };
-    loadModels();
-  }, []);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -406,14 +444,13 @@ function ChatContent() {
     setSending(true);
 
     try {
-      // persist preferences (model only)
-      try { localStorage.setItem('chat_model', model); } catch {}
       let response;
       
       // Build context from selections
       const documentIds = documentId ? [parseInt(documentId)] : selectedDocuments;
       const caseId = selectedCase;
       const useTanzLiiFlag = useTanzLii;
+      const useWebSearchFlag = useWebSearch;
       
       // Debug log
       console.log('DEBUG: Sending message with context:', {
@@ -436,15 +473,20 @@ function ChatContent() {
           await fetchChatSessions();
         }
 
-      // Always use query-documents endpoint when documentId is present or when context is selected
-      if (documentIds.length > 0 || caseId || useTanzLiiFlag || documentId) {
+      // Always use query-documents endpoint when documentId is present or when context is selected or when image is present or when web search is enabled
+      if (documentIds.length > 0 || caseId || useTanzLiiFlag || documentId || uploadedImageBase64 || useWebSearchFlag) {
         // Enhanced chat with context - get response then save to session
         const controller = new AbortController();
         controllerRef.current = controller;
         const requestPayload: any = {
           query: content,
-          use_tanzlii: useTanzLiiFlag
+          use_tanzlii: useTanzLiiFlag,
+          use_web_search: useWebSearchFlag
         };
+        // Include image if present
+        if (uploadedImageBase64) {
+          requestPayload.image_base64 = uploadedImageBase64;
+        }
         // Always include document_ids if we have documentId from URL or selected documents
         if (documentIds.length > 0) {
           requestPayload.document_ids = documentIds;
@@ -462,14 +504,24 @@ function ChatContent() {
         if (currentSessionId) {
           requestPayload.session_id = currentSessionId;
         }
-        console.log('DEBUG: Sending query with context:', requestPayload);
+        console.log('DEBUG: Sending query with context:', { ...requestPayload, image_base64: uploadedImageBase64 ? '[present]' : '[none]' });
         response = await api.post('/api/chat/query-documents', requestPayload, { signal: controller.signal });
+        
+        // Clear uploaded image after sending
+        if (uploadedImageBase64) {
+          setUploadedImageBase64(null);
+          setUploadedFile(null);
+        }
         
         // Save messages to session after getting response
         try {
-          const responseContent = response.data?.response 
+          let responseContent = response.data?.response 
             ? response.data.response 
             : (response.data?.content || response.data?.message || '');
+          
+          // If sources are provided, they're already included in the response
+          // But we can also handle them separately if needed
+          const sources = response.data?.sources;
           
           // Save user message
           await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { 
@@ -477,7 +529,16 @@ function ChatContent() {
             message_type: 'user'
           });
           
-          // Save assistant response
+          // Save assistant response (includes sources if present)
+          const assistantMessage: ChatMessage = {
+            id: Date.now() + 1,
+            content: responseContent,
+            is_user: false,
+            created_at: new Date().toISOString(),
+            sources: sources || undefined
+          };
+          setMessages(prev => [...prev, assistantMessage]);
+          
           await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { 
             content: responseContent,
             message_type: 'assistant'
@@ -490,12 +551,16 @@ function ChatContent() {
         // General chat without context - use standard endpoint that saves messages
         const controller = new AbortController();
         controllerRef.current = controller;
-        response = await api.post(`/api/chat/sessions/${sessionId}/messages`, { 
+        const requestPayload: any = {
           content,
           document_ids: documentIds.length > 0 ? documentIds : undefined,
           case_id: caseId || undefined,
           use_tanzlii: useTanzLiiFlag
-        }, { signal: controller.signal });
+        };
+        if (useWebSearchFlag) {
+          requestPayload.use_web_search = true;
+        }
+        response = await api.post(`/api/chat/sessions/${sessionId}/messages`, requestPayload, { signal: controller.signal });
       }
 
       // Create AI message placeholder
@@ -510,12 +575,13 @@ function ChatContent() {
 
       setMessages(prev => [...prev, aiMessage]);
       // Handle response based on endpoint used
-      // query-documents returns {response: ...}
+      // query-documents returns {response: ..., sources: ...}
       // sessions/{id}/messages returns {content: ...}
       const responseContent = response.data?.response 
         ? response.data.response 
         : (response.data?.content || response.data?.message || '');
-      setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: responseContent, isStreaming: false } : m));
+      const sources = response.data?.sources;
+      setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: responseContent, isStreaming: false, sources: sources || undefined } : m));
 
       // After assistant reply in general chat, auto-summarize session title
       if (!documentId && currentSessionId) {
@@ -686,17 +752,17 @@ function ChatContent() {
                   </div>
                   <div>
                     <h1 className="text-xl font-bold text-secondary-900 dark:text-secondary-100">
-                      {documentId ? 'Document Chat' : 'Lega Assistant'}
+                      {documentId ? 'Document Chat' : 'MeLT Assistant'}
                     </h1>
                     <p className="text-sm text-secondary-600 dark:text-secondary-400 font-medium">
-                      {documentId ? (documentName || 'Loading...') : 'General Lega Assistant'}
+                      {documentId ? (documentName || 'Loading...') : 'General MeLT Assistant'}
                     </p>
                   </div>
                 </div>
               </div>
               <div className="flex items-center space-x-2">
                 <div className="px-3 py-1 bg-success-100 text-success-800 dark:bg-success-900/20 dark:text-success-400 rounded-full text-xs font-medium">
-                  Lega
+                  MeLT
                 </div>
               </div>
             </div>
@@ -918,7 +984,7 @@ function ChatContent() {
                           <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
                             <MessageCircle className="h-4 w-4 text-white" />
                           </div>
-                          <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">Lega</span>
+                          <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">MeLT</span>
                         </div>
                       )}
                       <div
@@ -955,9 +1021,48 @@ function ChatContent() {
                           message.is_user ? (
                             <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
                           ) : (
-                            <div className="prose prose-sm dark:prose-invert max-w-none">
-                              <ReactMarkdown>{message.content}</ReactMarkdown>
-                            </div>
+                            <>
+                              <div className="prose prose-sm dark:prose-invert max-w-none">
+                                <ReactMarkdown>{message.content}</ReactMarkdown>
+                              </div>
+                              {/* Sources Section */}
+                              {message.sources && message.sources.length > 0 && (
+                                <div className="mt-4 pt-3 border-t border-secondary-200 dark:border-secondary-700">
+                                  <p className="text-xs font-medium text-secondary-600 dark:text-secondary-400 mb-2">Sources:</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {message.sources.map((source, idx) => (
+                                      <div key={idx} className="flex items-center gap-1">
+                                        <button
+                                          onClick={() => {
+                                            // Use this source for retrieval - send a query about it
+                                            const queryText = `Tell me more about: ${source.title}`;
+                                            setNewMessage(queryText);
+                                            // Optionally auto-send
+                                            setTimeout(() => {
+                                              sendMessage(queryText);
+                                            }, 100);
+                                          }}
+                                          className="text-xs px-2 py-1 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 rounded-md hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors border border-primary-200 dark:border-primary-800"
+                                          title={`Use "${source.title}" for retrieval`}
+                                        >
+                                          {source.title || `Source ${idx + 1}`}
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            // Open source in new tab
+                                            window.open(source.url, '_blank', 'noopener,noreferrer');
+                                          }}
+                                          className="text-xs p-1 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
+                                          title="Open in new tab"
+                                        >
+                                          ↗
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </>
                           )
                         )}
                         
@@ -1048,7 +1153,7 @@ function ChatContent() {
                           <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
                           <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
                         </div>
-                        <span className="text-sm text-secondary-600 dark:text-secondary-400">Lega is thinking...</span>
+                        <span className="text-sm text-secondary-600 dark:text-secondary-400">MeLT is thinking...</span>
                       </div>
                     </div>
                   </div>
@@ -1061,219 +1166,219 @@ function ChatContent() {
 
             {/* Context Selection Bar - For Lawyers/Admins */}
             {!documentId && currentUser?.role !== 'client' && (
-              <div className="px-6 pt-4 pb-2">
+              <div className="px-6 pt-4 pb-3">
                 <div className="max-w-4xl mx-auto">
-                  <div className="flex flex-wrap items-center gap-3 mb-3">
-                    {/* Document Selection */}
-                    <div className="relative">
-                  <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowDocumentSelector(!showDocumentSelector);
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs border transition-colors flex items-center gap-2 ${
-                          selectedDocuments.length > 0
-                            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
-                            : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
-                        }`}
-                        data-document-selector
+                  {/* Organized Control Groups - Compact */}
+                  <div className="bg-white/30 dark:bg-secondary-800/30 backdrop-blur-sm border border-secondary-200/50 dark:border-secondary-700/50 rounded-lg p-2 space-y-2">
+                    {/* Context Sources Section - Compact */}
+                    <div>
+                      <button
+                        onClick={() => setContextSectionExpanded(!contextSectionExpanded)}
+                        className="flex items-center gap-1.5 w-full text-left hover:bg-secondary-100/50 dark:hover:bg-secondary-700/30 rounded-md px-2 py-1 transition-colors group"
                       >
-                        <FileText className="h-3.5 w-3.5" />
-                        Documents {selectedDocuments.length > 0 && `(${selectedDocuments.length}/3)`}
+                        <span className="text-[10px] font-medium text-secondary-500 dark:text-secondary-400">Context:</span>
+                        {contextSectionExpanded ? (
+                          <ChevronUp className="h-3 w-3 text-secondary-400 dark:text-secondary-500" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 text-secondary-400 dark:text-secondary-500" />
+                        )}
+                        {(selectedDocuments.length > 0 || selectedCase) && (
+                          <span className="ml-auto px-1.5 py-0.5 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full text-[9px] font-medium">
+                            {selectedDocuments.length + (selectedCase ? 1 : 0)}
+                          </span>
+                        )}
                       </button>
-                      {showDocumentSelector && (
-                        <div className="absolute bottom-full left-0 mb-2 w-80 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto" data-document-selector>
-                          <div className="p-3 border-b border-secondary-200 dark:border-secondary-700">
-                            <div className="flex items-center justify-between mb-2">
-                              <h4 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100">Select Documents (max 3)</h4>
-                  <button
-                                onClick={() => {
-                                  setSelectedDocuments([]);
-                                  setShowDocumentSelector(false);
-                                }}
-                                className="text-xs text-error-600 hover:text-error-700"
-                              >
-                                Clear
-                              </button>
-                            </div>
-                            <p className="text-xs text-secondary-600 dark:text-secondary-400">Choose up to 3 documents to use as context</p>
-                          </div>
-                          <div className="p-2">
-                            {allDocuments.length === 0 ? (
-                              <p className="text-xs text-secondary-500 dark:text-secondary-400 p-3 text-center">No documents available</p>
-                            ) : (
-                              allDocuments.map((doc) => {
-                                const isSelected = selectedDocuments.includes(doc.id);
-                                const canSelect = isSelected || selectedDocuments.length < 3;
-                                return (
-                                  <label
-                                    key={doc.id}
-                                    className={`flex items-start space-x-2 p-2 rounded-lg cursor-pointer transition-colors ${
-                                      isSelected
-                                        ? 'bg-primary-50 dark:bg-primary-900/20'
-                                        : canSelect
-                                        ? 'hover:bg-secondary-50 dark:hover:bg-secondary-700/50'
-                                        : 'opacity-50 cursor-not-allowed'
-                                    }`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={(e) => {
-                                        if (e.target.checked && selectedDocuments.length < 3) {
-                                          setSelectedDocuments([...selectedDocuments, doc.id]);
-                                        } else if (!e.target.checked) {
-                                          setSelectedDocuments(selectedDocuments.filter((id) => id !== doc.id));
-                                        }
-                                      }}
-                                      disabled={!canSelect}
-                                      className="mt-1"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-xs font-medium text-secondary-900 dark:text-secondary-100 truncate">
-                                        {doc.original_filename}
-                                      </p>
-                                      {doc.case_id && (
-                                        <p className="text-xs text-secondary-500 dark:text-secondary-400">
-                                          Case #{doc.case_id}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </label>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Case Selection */}
-                    <div className="relative">
-                  <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowCaseSelector(!showCaseSelector);
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs border transition-colors flex items-center gap-2 ${
-                          selectedCase
-                            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
-                            : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
-                        }`}
-                        data-case-selector
-                      >
-                        <Gavel className="h-3.5 w-3.5" />
-                        Case {selectedCase && `(${allCases.find(c => c.id === selectedCase)?.case_number || selectedCase})`}
-                      </button>
-                      {showCaseSelector && (
-                        <div className="absolute bottom-full left-0 mb-2 w-80 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto" data-case-selector>
-                          <div className="p-3 border-b border-secondary-200 dark:border-secondary-700">
-                            <div className="flex items-center justify-between mb-2">
-                              <h4 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100">Select Case</h4>
-                              <button
-                                onClick={() => {
-                                  setSelectedCase(null);
-                                  setShowCaseSelector(false);
-                                }}
-                                className="text-xs text-error-600 hover:text-error-700"
-                              >
-                                Clear
-                              </button>
-                </div>
-                            <p className="text-xs text-secondary-600 dark:text-secondary-400">Choose a case to use as context</p>
-              </div>
-                          <div className="p-2">
-                            {allCases.length === 0 ? (
-                              <p className="text-xs text-secondary-500 dark:text-secondary-400 p-3 text-center">No cases available</p>
-                            ) : (
-                              allCases.map((caseItem) => (
+                      
+                      {contextSectionExpanded && (
+                        <div className="flex flex-wrap items-center gap-1.5 pl-2 pt-1">
+                          {/* Document Selection */}
+                          <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowDocumentSelector(!showDocumentSelector);
+                          }}
+                          className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
+                            selectedDocuments.length > 0
+                              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
+                              : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
+                          }`}
+                          data-document-selector
+                        >
+                          <FileText className="h-3 w-3" />
+                          <span className="text-[10px]">Docs {selectedDocuments.length > 0 && `(${selectedDocuments.length}/3)`}</span>
+                        </button>
+                        {showDocumentSelector && (
+                          <div className="absolute bottom-full left-0 mb-2 w-80 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto" data-document-selector>
+                            <div className="p-3 border-b border-secondary-200 dark:border-secondary-700">
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100">Select Documents (max 3)</h4>
                                 <button
-                                  key={caseItem.id}
                                   onClick={() => {
-                                    setSelectedCase(caseItem.id);
-                                    setShowCaseSelector(false);
+                                    setSelectedDocuments([]);
+                                    setShowDocumentSelector(false);
                                   }}
-                                  className={`w-full text-left p-2 rounded-lg transition-colors ${
-                                    selectedCase === caseItem.id
-                                      ? 'bg-primary-50 dark:bg-primary-900/20'
-                                      : 'hover:bg-secondary-50 dark:hover:bg-secondary-700/50'
-                                  }`}
+                                  className="text-xs text-error-600 hover:text-error-700"
                                 >
-                                  <p className="text-xs font-medium text-secondary-900 dark:text-secondary-100">
-                                    {caseItem.case_number}: {caseItem.title}
-                                  </p>
-                                  <p className="text-xs text-secondary-500 dark:text-secondary-400">
-                                    {caseItem.client_name} • {caseItem.status}
-                                  </p>
+                                  Clear
                                 </button>
-                              ))
-                            )}
+                              </div>
+                              <p className="text-xs text-secondary-600 dark:text-secondary-400">Choose up to 3 documents to use as context</p>
+                            </div>
+                            <div className="p-2">
+                              {allDocuments.length === 0 ? (
+                                <p className="text-xs text-secondary-500 dark:text-secondary-400 p-3 text-center">No documents available</p>
+                              ) : (
+                                allDocuments.map((doc) => {
+                                  const isSelected = selectedDocuments.includes(doc.id);
+                                  const canSelect = isSelected || selectedDocuments.length < 3;
+                                  return (
+                                    <label
+                                      key={doc.id}
+                                      className={`flex items-start space-x-2 p-2 rounded-lg cursor-pointer transition-colors ${
+                                        isSelected
+                                          ? 'bg-primary-50 dark:bg-primary-900/20'
+                                          : canSelect
+                                          ? 'hover:bg-secondary-50 dark:hover:bg-secondary-700/50'
+                                          : 'opacity-50 cursor-not-allowed'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={(e) => {
+                                          if (e.target.checked && selectedDocuments.length < 3) {
+                                            setSelectedDocuments([...selectedDocuments, doc.id]);
+                                          } else if (!e.target.checked) {
+                                            setSelectedDocuments(selectedDocuments.filter((id) => id !== doc.id));
+                                          }
+                                        }}
+                                        disabled={!canSelect}
+                                        className="mt-1"
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-medium text-secondary-900 dark:text-secondary-100 truncate">
+                                          {doc.original_filename}
+                                        </p>
+                                        {doc.case_id && (
+                                          <p className="text-xs text-secondary-500 dark:text-secondary-400">
+                                            Case #{doc.case_id}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </label>
+                                  );
+                                })
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* TanzLii Toggle */}
-                    <button
-                      onClick={() => setUseTanzLii(!useTanzLii)}
-                      className={`px-3 py-1.5 rounded-lg text-xs border transition-colors flex items-center gap-2 ${
-                        useTanzLii
-                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
-                          : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
-                      }`}
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      TanzLii
-                    </button>
-
-                    {/* Selected Items Display */}
-                    {(selectedDocuments.length > 0 || selectedCase || useTanzLii) && (
-                      <div className="flex-1 flex flex-wrap items-center gap-2 text-xs">
-                        {selectedDocuments.length > 0 && (
-                          <div className="flex items-center gap-1 flex-wrap">
-                            {selectedDocuments.map((docId) => {
-                              const doc = allDocuments.find((d) => d.id === docId);
-                              return doc ? (
-                                <span
-                                  key={docId}
-                                  className="px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full flex items-center gap-1"
-                                >
-                                  {doc.original_filename}
-                                  <button
-                                    onClick={() => setSelectedDocuments(selectedDocuments.filter((id) => id !== docId))}
-                                    className="hover:text-error-600"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </span>
-                              ) : null;
-                            })}
-                          </div>
-                        )}
-                        {selectedCase && (
-                          <span className="px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full flex items-center gap-1">
-                            {allCases.find((c) => c.id === selectedCase)?.case_number || `Case #${selectedCase}`}
-                            <button
-                              onClick={() => setSelectedCase(null)}
-                              className="hover:text-error-600"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
-                        )}
-                        {useTanzLii && (
-                          <span className="px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full flex items-center gap-1">
-                            TanzLii
-                            <button
-                              onClick={() => setUseTanzLii(false)}
-                              className="hover:text-error-600"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
                         )}
                       </div>
-                    )}
+
+                      {/* Case Selection */}
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowCaseSelector(!showCaseSelector);
+                          }}
+                          className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
+                            selectedCase
+                              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
+                              : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
+                          }`}
+                          data-case-selector
+                        >
+                          <Gavel className="h-3 w-3" />
+                          <span className="text-[10px]">Case {selectedCase && `(${allCases.find(c => c.id === selectedCase)?.case_number || selectedCase})`}</span>
+                        </button>
+                        {showCaseSelector && (
+                          <div className="absolute bottom-full left-0 mb-2 w-80 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto" data-case-selector>
+                            <div className="p-3 border-b border-secondary-200 dark:border-secondary-700">
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100">Select Case</h4>
+                                <button
+                                  onClick={() => {
+                                    setSelectedCase(null);
+                                    setShowCaseSelector(false);
+                                  }}
+                                  className="text-xs text-error-600 hover:text-error-700"
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                              <p className="text-xs text-secondary-600 dark:text-secondary-400">Choose a case to use as context</p>
+                            </div>
+                            <div className="p-2">
+                              {allCases.length === 0 ? (
+                                <p className="text-xs text-secondary-500 dark:text-secondary-400 p-3 text-center">No cases available</p>
+                              ) : (
+                                allCases.map((caseItem) => (
+                                  <button
+                                    key={caseItem.id}
+                                    onClick={() => {
+                                      setSelectedCase(caseItem.id);
+                                      setShowCaseSelector(false);
+                                    }}
+                                    className={`w-full text-left p-2 rounded-lg transition-colors ${
+                                      selectedCase === caseItem.id
+                                        ? 'bg-primary-50 dark:bg-primary-900/20'
+                                        : 'hover:bg-secondary-50 dark:hover:bg-secondary-700/50'
+                                    }`}
+                                  >
+                                    <p className="text-xs font-medium text-secondary-900 dark:text-secondary-100">
+                                      {caseItem.case_number}: {caseItem.title}
+                                    </p>
+                                    <p className="text-xs text-secondary-500 dark:text-secondary-400">
+                                      {caseItem.client_name} • {caseItem.status}
+                                    </p>
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Search Options Section - Compact */}
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-secondary-200/50 dark:border-secondary-700/50 pt-1.5">
+                      <span className="text-[10px] font-medium text-secondary-500 dark:text-secondary-400 px-1.5 py-0.5">Search:</span>
+                      
+                      {/* TanzLii Toggle */}
+                      <button
+                        onClick={() => setUseTanzLii(!useTanzLii)}
+                        className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
+                          useTanzLii
+                            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
+                            : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
+                        }`}
+                      >
+                        <FileText className="h-3 w-3" />
+                        <span className="text-[10px]">TanzLii</span>
+                      </button>
+
+                      {/* Web Search Toggle */}
+                      <button
+                        onClick={() => {
+                          setUseWebSearch(!useWebSearch);
+                          if (useWebSearch) {
+                            setUploadedFile(null);
+                            setUploadedImageBase64(null);
+                          }
+                        }}
+                        className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
+                          useWebSearch
+                            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
+                            : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
+                        }`}
+                      >
+                        <Search className="h-3 w-3" />
+                        <span className="text-[10px]">Web Search</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1323,103 +1428,138 @@ function ChatContent() {
                 )}
                 
                 <div className="flex flex-col space-y-3">
-                  {/* Model selector - moved above input on mobile, inline on desktop */}
-                  <div className="flex items-center gap-2 sm:hidden">
-                    <span className="text-xs text-secondary-500 dark:text-secondary-400 font-medium whitespace-nowrap">Model:</span>
-                    <select
-                      value={model}
-                      onChange={(e)=>setModel(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-xs px-2.5 py-1.5 rounded-md border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 hover:bg-secondary-50 dark:hover:bg-secondary-700 transition-colors cursor-pointer shadow-sm flex-1"
-                      title={`Current model: ${modelOptions.find(m => m.value === model)?.label || model}`}
-                    >
-                      {modelOptions.map(m => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div className="relative flex-1">
-                    {/* Model selector inside input (left side) - hidden on mobile, visible on desktop */}
-                    <div className="hidden sm:flex absolute left-3 items-center gap-2 z-10" style={{ top: '50%', transform: 'translateY(-50%)' }}>
-                      <span className="text-xs text-secondary-500 dark:text-secondary-400 font-medium whitespace-nowrap">Model:</span>
-                      <select
-                        value={model}
-                        onChange={(e)=>setModel(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-xs px-2.5 py-1.5 rounded-md border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 hover:bg-secondary-50 dark:hover:bg-secondary-700 transition-colors cursor-pointer shadow-sm min-w-[110px]"
-                        title={`Current model: ${modelOptions.find(m => m.value === model)?.label || model}`}
+                  {uploadedFile && uploadedImageBase64 && (
+                    <div className="mb-3 p-3 bg-secondary-50 dark:bg-secondary-800 rounded-lg flex items-center gap-3">
+                      <img 
+                        src={`data:${uploadedFile.type};base64,${uploadedImageBase64}`}
+                        alt="Preview"
+                        className="h-16 w-16 object-cover rounded"
+                      />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-secondary-900 dark:text-secondary-100">{uploadedFile.name}</p>
+                        <p className="text-xs text-secondary-500 dark:text-secondary-400">Ready to send with message</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setUploadedFile(null);
+                          setUploadedImageBase64(null);
+                        }}
+                        className="p-1 text-secondary-400 hover:text-secondary-600 dark:hover:text-secondary-300"
+                        type="button"
                       >
-                        {modelOptions.map(m => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
-                      </select>
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
+                  )}
+                  <div className="relative flex-1">
                     <textarea
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyPress={handleKeyPress}
                       placeholder={documentId ? "Ask a question about this document..." : "Ask me anything..."}
-                      className="w-full sm:pl-[240px] pl-4 sm:pr-36 pr-28 border border-secondary-300 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none bg-white dark:bg-secondary-800 shadow-sm transition-all duration-200 placeholder-secondary-400 dark:placeholder-secondary-500 text-sm text-secondary-900 dark:text-secondary-100"
-                      rows={2}
+                      className="w-full pl-4 sm:pr-36 pr-28 border border-secondary-300 dark:border-secondary-600 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none bg-white dark:bg-secondary-800 shadow-sm transition-all duration-200 placeholder-secondary-400 dark:placeholder-secondary-500 text-sm text-secondary-900 dark:text-secondary-100"
+                      rows={1}
                       disabled={sending}
+                      spellCheck={autocorrectEnabled}
                       style={{ 
-                        paddingTop: '18px', 
-                        paddingBottom: '18px',
-                        lineHeight: '1.8'
+                        paddingTop: '12px', 
+                        paddingBottom: '12px',
+                        lineHeight: '1.5',
+                        minHeight: '44px',
+                        maxHeight: '120px',
+                        borderRadius: '9999px'
                       }}
                     />
                     {/* Inline actions inside the input (right side) - responsive spacing */}
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                      {/* Mobile: Only show send button, desktop: show all buttons */}
-                      {currentUser?.role === 'client' && (
-                        <>
-                          <input
-                            type="file"
-                            ref={fileInputRef}
-                            onChange={handleFileUpload}
-                            className="hidden"
-                            accept=".pdf,.doc,.docx,.txt,.csv,.xls,.xlsx,.md,.json,.xml"
-                            disabled={uploadingFile}
-                          />
-                          <button
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={uploadingFile}
-                            className="hidden sm:flex p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Upload document"
-                            aria-label="Upload document"
-                          >
-                            <Upload className={`h-4 w-4 text-secondary-500 dark:text-secondary-400 ${uploadingFile ? 'animate-pulse' : ''}`} />
-                          </button>
-                        </>
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                      {/* Mode selector button (Plus) */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowModeSelector(!showModeSelector);
+                        }}
+                        className="h-9 w-9 rounded-full hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors flex items-center justify-center shrink-0"
+                        title="Toggle between web search and file upload"
+                        aria-label="Toggle mode"
+                        data-mode-selector
+                      >
+                        <Plus className={`h-4 w-4 text-secondary-500 dark:text-secondary-400 ${(useWebSearch || uploadedFile) ? 'text-primary-500 dark:text-primary-400' : ''}`} />
+                      </button>
+                      {/* Mode selector dropdown */}
+                      {showModeSelector && (
+                        <div className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50" data-mode-selector>
+                          <div className="p-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setUseWebSearch(true);
+                                setUploadedFile(null);
+                                setUploadedImageBase64(null);
+                                if (fileInputRef.current) fileInputRef.current.value = '';
+                                setShowModeSelector(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
+                                useWebSearch
+                                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                                  : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
+                              }`}
+                            >
+                              <Search className="h-4 w-4" />
+                              Web Search
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setUseWebSearch(false);
+                                fileInputRef.current?.click();
+                                setShowModeSelector(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 mt-1 ${
+                                uploadedFile
+                                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                                  : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
+                              }`}
+                            >
+                              <Upload className="h-4 w-4" />
+                              Upload File
+                            </button>
+                          </div>
+                        </div>
                       )}
-                      <button
-                        onClick={handleCopyInput}
-                        disabled={!newMessage.trim()}
-                        className="hidden sm:flex p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Copy message"
-                        aria-label="Copy message"
-                      >
-                        <Copy className="h-4 w-4 text-secondary-500 dark:text-secondary-400" />
-                      </button>
-                      <button
-                        onClick={handleClearInput}
-                        disabled={!newMessage.trim()}
-                        className="hidden sm:flex p-1.5 rounded-md hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Clear message"
-                        aria-label="Clear message"
-                      >
-                        <X className="h-4 w-4 text-secondary-500 dark:text-secondary-400" />
-                      </button>
-                      <button
-                        onClick={() => (sending ? handleStop() : sendMessage(newMessage))}
-                        disabled={!newMessage.trim() && !sending}
-                        className={`ml-1 px-3 sm:px-3 h-9 rounded-md shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center ${sending ? 'bg-secondary-600 text-white hover:bg-secondary-700' : 'bg-primary-600 hover:bg-primary-700 text-white'}`}
-                        title={sending ? 'Pause' : 'Send'}
-                        aria-label={sending ? 'Pause' : 'Send'}
-                      >
-                        {sending ? <Pause className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-                      </button>
+                      {/* File upload input (hidden) */}
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        accept=".pdf,.doc,.docx,.txt,.csv,.xls,.xlsx,.md,.json,.xml,.jpg,.jpeg,.png,.gif,.webp,image/*"
+                        disabled={uploadingFile || useWebSearch}
+                      />
+                      {/* Web search indicator - only show when web search is enabled */}
+                      {useWebSearch && (
+                        <button
+                          onClick={() => {
+                            setUseWebSearch(false);
+                            setShowModeSelector(false);
+                          }}
+                          className="h-9 w-9 rounded-full hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors flex items-center justify-center shrink-0"
+                          title="Disable web search"
+                          aria-label="Disable web search"
+                        >
+                          <Search className="h-4 w-4 text-primary-500 dark:text-primary-400" />
+                        </button>
+                      )}
+                      {newMessage.trim() && (
+                        <button
+                          onClick={() => (sending ? handleStop() : sendMessage(newMessage))}
+                          disabled={sending}
+                          className={`px-3 sm:px-3 h-9 rounded-full shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center shrink-0 ${sending ? 'bg-secondary-600 text-white hover:bg-secondary-700' : 'bg-primary-600 hover:bg-primary-700 text-white'}`}
+                          title={sending ? 'Pause' : 'Send'}
+                          aria-label={sending ? 'Pause' : 'Send'}
+                        >
+                          {sending ? <Pause className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1430,7 +1570,7 @@ function ChatContent() {
                   </p>
                   <div className="flex items-center space-x-2">
                     <div className="w-2 h-2 bg-success-500 rounded-full"></div>
-                    <span className="text-xs text-secondary-500 dark:text-secondary-400">Lega Ready</span>
+                    <span className="text-xs text-secondary-500 dark:text-secondary-400">MeLT Ready</span>
                   </div>
                 </div>
               </div>

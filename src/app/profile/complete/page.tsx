@@ -39,7 +39,8 @@ export default function CompleteProfilePage() {
       setUser(response.data);
       
       // Check if profile is already complete
-      if (response.data.full_name && response.data.username && response.data.phone) {
+      // Phone is optional in the new onboarding flow, so we don't require it
+      if (response.data.full_name && response.data.username) {
         router.push('/dashboard');
         return;
       }
@@ -54,7 +55,7 @@ export default function CompleteProfilePage() {
       showError('Failed to fetch user information');
       // Redirect to login if not authenticated
       if (error.response?.status === 401) {
-        router.push('/login');
+        router.push('/auth');
       }
     } finally {
       setLoading(false);
@@ -64,8 +65,8 @@ export default function CompleteProfilePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!form.full_name || !form.username || !form.phone) {
-      showError('Please fill in all required fields');
+    if (!form.full_name || !form.username) {
+      showError('Please fill in all required fields (Full Name and Username)');
       return;
     }
     
@@ -94,9 +95,9 @@ export default function CompleteProfilePage() {
   };
 
   const isProfileComplete = () => {
+    // Phone is optional in the new onboarding flow
     return form.full_name.trim() !== '' && 
-           form.username.trim() !== '' && 
-           form.phone.trim() !== '';
+           form.username.trim() !== '';
   };
 
   if (loading) {
@@ -175,14 +176,13 @@ export default function CompleteProfilePage() {
               </div>
 
               <div className="form-group">
-                <label className="label-required">Phone Number</label>
+                <label>Phone Number (Optional)</label>
                 <input
                   type="tel"
                   className="input"
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
                   placeholder="+255712345678"
-                  required
                 />
                 <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">
                   Include country code (e.g., +255 for Tanzania)

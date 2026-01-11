@@ -21,6 +21,7 @@ export default function DocumentEditor({
   templateName = 'Document',
   onAIEdit
 }: DocumentEditorProps) {
+  const autocorrectEnabled = useAutocorrect();
   const [showAIEdit, setShowAIEdit] = useState(false);
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -171,6 +172,7 @@ export default function DocumentEditor({
           className="w-full h-full p-6 text-secondary-900 dark:text-secondary-100 bg-white dark:bg-secondary-800 border-0 resize-none focus:outline-none focus:ring-0 text-sm leading-relaxed whitespace-pre-wrap"
           placeholder="Document content will appear here..."
           style={{ minHeight: '500px', fontFamily: 'system-ui, -apple-system, sans-serif' }}
+          spellCheck={autocorrectEnabled}
         />
       </div>
     </div>

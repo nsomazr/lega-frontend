@@ -822,6 +822,7 @@ export default function TemplatesPage() {
                             ...templateVariables,
                             [field.name]: e.target.value
                           })}
+                          spellCheck={typeof window !== 'undefined' ? (localStorage.getItem('enable_autocorrect') === 'true') : false}
                         />
                       ) : field.type === 'select' && field.options ? (
                         <select

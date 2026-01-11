@@ -60,7 +60,7 @@ export default function AnalyticsPage() {
         setFileTypeMix(mix);
       } catch (e: any) {
         if (e?.response?.status === 401) {
-          router.push('/login');
+          router.push('/auth');
           return;
         }
         setError(e?.message || 'Failed to load analytics');

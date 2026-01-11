@@ -10,10 +10,10 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Lega - Legal Tech Platform',
+  title: 'MeLT - Msomi e-Legal Tool',
   description: 'Professional legal practice management with AI integration',
   keywords: ['legal', 'practice management', 'AI', 'document analysis', 'case management'],
-  authors: [{ name: 'Lega Team' }],
+  authors: [{ name: 'MeLT Team' }],
 };
 
 export const viewport: Viewport = {

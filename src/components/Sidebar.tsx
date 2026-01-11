@@ -14,6 +14,7 @@ import {
   Scale,
   ChevronRight,
   Activity,
+  Cog,
 } from 'lucide-react';
 
 interface User {
@@ -120,6 +121,12 @@ const adminNavigation = [
     icon: Activity,
     description: 'Activity logs'
   },
+  { 
+    name: 'Settings', 
+    href: '/admin/settings', 
+    icon: Cog,
+    description: 'System settings'
+  },
 ];
 
 // Get user's first letter from full_name, username, or email
@@ -202,8 +209,8 @@ export default function Sidebar({ user, collapsed = false }: SidebarProps) {
             </div>
             {!collapsed && (
               <div className="flex flex-col">
-                <span className="text-xl font-bold gradient-text">Lega</span>
-                <span className="text-xs text-secondary-600 dark:text-secondary-400">Legal Platform</span>
+                <span className="text-xl font-bold gradient-text">MeLT</span>
+                <span className="text-xs text-secondary-600 dark:text-secondary-400">Msomi e-Legal Tool</span>
               </div>
             )}
           </div>

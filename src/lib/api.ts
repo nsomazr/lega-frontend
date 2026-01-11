@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { markSessionExpired, isSessionExpiredShown, isRedirectInProgress, setRedirectInProgress } from './sessionManager';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -101,12 +102,21 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       const currentPath = window.location.pathname;
-      // Only remove token and redirect if NOT on login/register pages
+      // Only remove token and redirect if NOT on auth/login/register pages
       // This prevents page refresh on login failures
-      if (!currentPath.includes('/login') && !currentPath.includes('/register')) {
+      // Also check if this is a login request - don't redirect on login failures
+      const isLoginRequest = error.config?.url?.includes('/api/auth/login');
+      const isAuthPage = currentPath.includes('/auth') || currentPath.includes('/login') || currentPath.includes('/register');
+      
+      if (!isAuthPage && !isLoginRequest) {
         localStorage.removeItem('access_token');
-        // Use router.push instead of window.location.href for smoother navigation
-        // But we can't use router here, so just remove token and let the component handle redirect
+        // Mark session as expired to prevent duplicate messages
+        if (!isSessionExpiredShown()) {
+          markSessionExpired();
+          setRedirectInProgress(true);
+          // Redirect with session expired message
+          window.location.href = '/auth?message=Session expired. Please sign in again.';
+        }
       }
     }
     return Promise.reject(error);

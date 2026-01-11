@@ -40,7 +40,8 @@ export default function AdminUsersPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState<User | null>(null);
-  const [showDelete, setShowDelete] = useState<{ open: boolean; user: User | null }>({ open: false, user: null });
+  const [showDelete, setShowDelete] = useState<{ open: boolean; user: User | null; permanent: boolean }>({ open: false, user: null, permanent: false });
+  const [showDeactivate, setShowDeactivate] = useState<{ open: boolean; user: User | null }>({ open: false, user: null });
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -56,7 +57,9 @@ export default function AdminUsersPage() {
     phone: '',
     location: '',
     whatsapp_number: '',
-    specialization: ''
+    specialization: '',
+    firm_name: '',
+    tin_number: ''
   });
 
   useEffect(() => {
@@ -98,9 +101,23 @@ export default function AdminUsersPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate enterprise_manager requirements
+    if (form.role === 'enterprise_manager' && !form.tin_number) {
+      showError('TIN number is required for enterprise managers');
+      return;
+    }
+    
     setCreating(true);
     try {
-      await api.post('/api/admin/users', form);
+      const payload: any = { ...form };
+      // Only include enterprise fields if role is enterprise_manager
+      if (form.role !== 'enterprise_manager') {
+        delete payload.firm_name;
+        delete payload.tin_number;
+      }
+      
+      await api.post('/api/admin/users', payload);
       setShowCreate(false);
       setForm({
         email: '',
@@ -111,7 +128,9 @@ export default function AdminUsersPage() {
         phone: '',
         location: '',
         whatsapp_number: '',
-        specialization: ''
+        specialization: '',
+        firm_name: '',
+        tin_number: ''
       });
       fetchUsers();
       success('User created successfully');
@@ -175,19 +194,39 @@ export default function AdminUsersPage() {
     
     try {
       await api.delete(`/api/admin/users/${showDelete.user.id}`);
-      setShowDelete({ open: false, user: null });
+      setShowDelete({ open: false, user: null, permanent: false });
       fetchUsers();
-      success('User deleted successfully');
+      success('User permanently deleted successfully');
     } catch (error: any) {
       showError(error.response?.data?.detail || 'Failed to delete user');
     }
   };
 
+  const handleDeactivate = async () => {
+    if (!showDeactivate.user) return;
+    
+    try {
+      await api.post(`/api/admin/users/${showDeactivate.user.id}/deactivate`);
+      setShowDeactivate({ open: false, user: null });
+      fetchUsers();
+      success('User deactivated successfully');
+    } catch (error: any) {
+      showError(error.response?.data?.detail || 'Failed to deactivate user');
+    }
+  };
+
   const toggleUserStatus = async (user: User) => {
     try {
-      await api.put(`/api/admin/users/${user.id}`, { is_active: !user.is_active });
+      if (user.is_active) {
+        // Deactivate
+        await api.post(`/api/admin/users/${user.id}/deactivate`);
+        success('User deactivated successfully');
+      } else {
+        // Activate
+        await api.post(`/api/admin/users/${user.id}/activate`);
+        success('User activated successfully');
+      }
       fetchUsers();
-      success(`User ${user.is_active ? 'suspended' : 'reactivated'} successfully`);
     } catch (error: any) {
       showError(error.response?.data?.detail || 'Failed to update user status');
     }
@@ -338,9 +377,9 @@ export default function AdminUsersPage() {
                         </button>
                         {currentUser?.id !== user.id && (
                           <button
-                            onClick={() => setShowDelete({ open: true, user })}
+                            onClick={() => setShowDelete({ open: true, user, permanent: true })}
                             className="btn-ghost btn-sm text-error-600 hover:text-error-700 dark:text-error-400"
-                            title="Delete"
+                            title="Delete Permanently"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -418,6 +457,7 @@ export default function AdminUsersPage() {
                       <option value="client">Client</option>
                       <option value="lawyer">Lawyer</option>
                       <option value="staff">Staff</option>
+                      <option value="enterprise_manager">Enterprise Manager / Law Firm</option>
                       <option value="admin">Admin</option>
                     </select>
                   </div>
@@ -460,6 +500,35 @@ export default function AdminUsersPage() {
                         placeholder="e.g., Criminal Law, Corporate Law"
                       />
                     </div>
+                  )}
+                  {form.role === 'enterprise_manager' && (
+                    <>
+                      <div className="form-group">
+                        <label className="label-required">Firm Name</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={form.firm_name}
+                          onChange={(e) => setForm({ ...form, firm_name: e.target.value })}
+                          placeholder="Enter law firm or enterprise name"
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="label-required">TIN Number</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={form.tin_number}
+                          onChange={(e) => setForm({ ...form, tin_number: e.target.value })}
+                          placeholder="Taxpayer Identification Number"
+                          required
+                        />
+                        <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">
+                          TIN number is required for law firms and enterprises
+                        </p>
+                      </div>
+                    </>
                   )}
                   <div className="flex gap-3 justify-end">
                     <button
@@ -541,6 +610,7 @@ export default function AdminUsersPage() {
                       <option value="client">Client</option>
                       <option value="lawyer">Lawyer</option>
                       <option value="staff">Staff</option>
+                      <option value="enterprise_manager">Enterprise Manager / Law Firm</option>
                       <option value="admin">Admin</option>
                     </select>
                   </div>
@@ -584,6 +654,35 @@ export default function AdminUsersPage() {
                       />
                     </div>
                   )}
+                  {form.role === 'enterprise_manager' && (
+                    <>
+                      <div className="form-group">
+                        <label className="label-required">Firm Name</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={form.firm_name}
+                          onChange={(e) => setForm({ ...form, firm_name: e.target.value })}
+                          placeholder="Enter law firm or enterprise name"
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="label-required">TIN Number</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={form.tin_number}
+                          onChange={(e) => setForm({ ...form, tin_number: e.target.value })}
+                          placeholder="Taxpayer Identification Number"
+                          required
+                        />
+                        <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">
+                          TIN number is required for law firms and enterprises
+                        </p>
+                      </div>
+                    </>
+                  )}
                   <div className="flex gap-3 justify-end">
                     <button
                       type="button"
@@ -611,13 +710,24 @@ export default function AdminUsersPage() {
           <div className="modal-overlay">
             <div className="modal-container">
               <div className="modal-body">
-                <h3 className="modal-title mb-2">Delete User?</h3>
-                <p className="text-sm text-secondary-700 dark:text-secondary-300 mb-4">
-                  This action cannot be undone. You are about to delete user "{showDelete.user.full_name}" ({showDelete.user.email}).
-                </p>
-                <div className="modal-footer">
+                <h3 className="modal-title mb-2">Permanently Delete User?</h3>
+                <div className="mb-4 p-4 bg-error-50 dark:bg-error-900/20 border border-error-200 dark:border-error-800 rounded-lg">
+                  <p className="text-sm font-medium text-error-800 dark:text-error-200 mb-2">
+                    ⚠️ Warning: This action cannot be undone!
+                  </p>
+                  <p className="text-sm text-error-700 dark:text-error-300">
+                    You are about to permanently delete user <strong>"{showDelete.user.full_name}"</strong> ({showDelete.user.email}).
+                    All associated data will be permanently removed from the system.
+                  </p>
+                </div>
+                <div className="mb-4">
+                  <p className="text-sm text-secondary-600 dark:text-secondary-400">
+                    If you only want to temporarily disable access, consider <strong>deactivating</strong> the user instead.
+                  </p>
+                </div>
+                <div className="flex gap-3 justify-end">
                   <button
-                    onClick={() => setShowDelete({ open: false, user: null })}
+                    onClick={() => setShowDelete({ open: false, user: null, permanent: false })}
                     className="btn-secondary btn-md"
                   >
                     Cancel
@@ -626,7 +736,36 @@ export default function AdminUsersPage() {
                     onClick={handleDelete}
                     className="btn-destructive btn-md"
                   >
-                    Delete
+                    Delete Permanently
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Deactivate Confirmation Modal */}
+        {showDeactivate.open && showDeactivate.user && (
+          <div className="modal-overlay">
+            <div className="modal-container">
+              <div className="modal-body">
+                <h3 className="modal-title mb-2">Deactivate User?</h3>
+                <p className="text-sm text-secondary-700 dark:text-secondary-300 mb-4">
+                  You are about to deactivate user <strong>"{showDeactivate.user.full_name}"</strong> ({showDeactivate.user.email}).
+                  The user will not be able to log in, but their data will be preserved. You can reactivate them later.
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setShowDeactivate({ open: false, user: null })}
+                    className="btn-secondary btn-md"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeactivate}
+                    className="btn-warning btn-md"
+                  >
+                    Deactivate
                   </button>
                 </div>
               </div>

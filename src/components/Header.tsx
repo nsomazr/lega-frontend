@@ -28,7 +28,7 @@ export default function Header({ user, onToggleSidebar, onToggleMobileSidebar, m
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
-    router.push('/login');
+    router.push('/auth');
   };
 
   return (
@@ -120,7 +120,7 @@ export default function Header({ user, onToggleSidebar, onToggleMobileSidebar, m
               >
                 <div className="hidden sm:block text-right">
                   <p className="text-sm font-medium text-foreground">{user.full_name || user.email}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
+                  <p className="text-xs text-muted-foreground">{user.role === 'enterprise_manager' ? 'Enterprise Manager' : user.role.charAt(0).toUpperCase() + user.role.slice(1)}</p>
                 </div>
                 <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-sm">
                   <span className="text-sm font-semibold text-white">
@@ -142,8 +142,8 @@ export default function Header({ user, onToggleSidebar, onToggleMobileSidebar, m
                       <div>
                         <p className="text-sm font-medium text-secondary-900 dark:text-secondary-100">{user.full_name || user.email}</p>
                         <p className="text-xs text-secondary-600 dark:text-secondary-400">{user.email}</p>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200 capitalize">
-                          {user.role}
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200">
+                          {user.role === 'enterprise_manager' ? 'Enterprise Manager' : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                         </span>
                       </div>
                     </div>
