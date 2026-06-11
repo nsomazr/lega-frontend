@@ -29,6 +29,10 @@ interface User {
   is_active: boolean;
   phone?: string;
   location?: string;
+  whatsapp_number?: string;
+  specialization?: string;
+  firm_name?: string;
+  tin_number?: string;
   created_at: string;
 }
 
@@ -151,8 +155,10 @@ export default function AdminUsersPage() {
       role: user.role,
       phone: user.phone || '',
       location: user.location || '',
-      whatsapp_number: (user as any).whatsapp_number || '',
-      specialization: (user as any).specialization || ''
+      whatsapp_number: user.whatsapp_number || '',
+      specialization: user.specialization || '',
+      firm_name: user.firm_name || '',
+      tin_number: user.tin_number || ''
     });
   };
 

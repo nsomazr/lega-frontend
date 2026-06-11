@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Save, Download, FileText, FileDown, File, FileType, Wand2, X } from 'lucide-react';
 import { useToast } from '@/components/Toast';
+import { useAutocorrect } from '@/lib/useAutocorrect';
 
 interface DocumentEditorProps {
   content: string;

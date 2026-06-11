@@ -537,6 +537,8 @@ function ChatContent() {
     }
     setSending(true);
 
+    let aiMessageId: number | undefined;
+
     try {
       let response;
       const trimmedContent = content.trim();
@@ -572,7 +574,7 @@ function ChatContent() {
         }
 
       // Create AI message placeholder first (so we can stream into it)
-      const aiMessageId = Date.now() + 1;
+      aiMessageId = Date.now() + 1;
       const aiMessage: ChatMessage = {
         id: aiMessageId,
         content: '',
@@ -833,7 +835,11 @@ function ChatContent() {
         created_at: new Date().toISOString()
       };
 
-      setMessages(prev => prev.filter(m => m.id !== aiMessageId).concat(errorChatMessage));
+      setMessages(prev =>
+        aiMessageId != null
+          ? prev.filter(m => m.id !== aiMessageId).concat(errorChatMessage)
+          : prev.concat(errorChatMessage)
+      );
     } finally {
       setSending(false);
       controllerRef.current = null;

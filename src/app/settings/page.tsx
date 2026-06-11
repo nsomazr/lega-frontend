@@ -17,6 +17,7 @@ interface User {
   is_active: boolean;
   created_at: string;
   preferred_ai_model?: string | null;
+  enable_autocorrect?: boolean;
 }
 
 interface ModelOption {
