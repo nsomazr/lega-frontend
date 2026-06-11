@@ -1,4 +1,4 @@
-// PM2 Ecosystem Configuration for Lega Frontend
+// PM2 Ecosystem Configuration for MeLT Frontend
 // Alternative to using deploy.sh - you can use: pm2 start ecosystem.config.js
 
 module.exports = {
@@ -13,7 +13,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3003,
-        NEXT_PUBLIC_API_URL: 'https://api.lega.nileagi.com',
+        NEXT_PUBLIC_API_URL: 'https://www.api.msomilegaltech.com',
       },
       error_file: './logs/frontend-error.log',
       out_file: './logs/frontend-out.log',

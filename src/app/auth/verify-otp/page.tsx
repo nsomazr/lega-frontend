@@ -99,10 +99,37 @@ export default function VerifyOTPPage() {
 
       if (response.data.success && response.data.session_token) {
         success('Code verified successfully');
-        // Redirect to password setup page
-        setTimeout(() => {
-          router.push(`/auth/set-password?token=${encodeURIComponent(response.data.session_token)}`);
-        }, 500);
+        const sessionToken = response.data.session_token;
+        // Continue without password (user chose code-only login)
+        try {
+          const continueRes = await api.post('/api/auth/continue-without-password', {
+            session_token: sessionToken
+          });
+          if (continueRes.data.success) {
+            if (continueRes.data.is_new_user) {
+              setTimeout(() => {
+                router.push(`/auth/onboarding?token=${encodeURIComponent(sessionToken)}`);
+              }, 500);
+            } else {
+              if (continueRes.data.access_token) {
+                localStorage.setItem('access_token', continueRes.data.access_token);
+                success('Signed in successfully');
+                await new Promise((r) => setTimeout(r, 300));
+                window.location.href = '/dashboard';
+              } else {
+                success('Signed in successfully');
+                setTimeout(() => router.push('/dashboard'), 500);
+              }
+            }
+          } else {
+            showError(continueRes.data.message || 'Something went wrong');
+            setLoading(false);
+          }
+        } catch (continueErr: any) {
+          const msg = continueErr.response?.data?.detail || continueErr.message || 'Failed to continue';
+          showError(msg);
+          setLoading(false);
+        }
       }
     } catch (err: any) {
       const errorMessage = err.response?.data?.detail || err.message || 'Invalid verification code';
@@ -136,22 +163,22 @@ export default function VerifyOTPPage() {
   const allFilled = code.every((digit) => digit !== '');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-secondary-900 dark:to-accent-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
-          <Link href="/auth" className="inline-flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-6">
+        <div className="bg-white dark:bg-secondary-800 rounded-2xl shadow-xl p-8">
+          <Link href="/auth" className="inline-flex items-center text-secondary-600 dark:text-secondary-400 hover:text-secondary-900 dark:hover:text-secondary-100 mb-6">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Link>
 
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            <h1 className="text-3xl font-bold text-secondary-900 dark:text-secondary-100 mb-2">
               Verify Your Code
             </h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-2">
+            <p className="text-secondary-600 dark:text-secondary-400 mb-2">
               Enter the 6-digit code sent to
             </p>
-            <p className="text-sm font-medium text-gray-900 dark:text-white">
+            <p className="text-sm font-medium text-secondary-900 dark:text-secondary-100">
               {identifier}
             </p>
           </div>
@@ -169,13 +196,13 @@ export default function VerifyOTPPage() {
                   onChange={(e) => handleChange(index, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(index, e)}
                   onPaste={handlePaste}
-                  className="w-12 h-14 text-center text-2xl font-bold border-2 border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-12 h-14 text-center text-2xl font-bold border-2 border-secondary-300 dark:border-secondary-600 rounded-lg bg-white dark:bg-secondary-700 text-secondary-900 dark:text-secondary-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   disabled={loading}
                 />
               ))}
             </div>
 
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <div className="flex items-center justify-center gap-2 text-sm text-secondary-600 dark:text-secondary-400">
               <Clock className="h-4 w-4" />
               <span>Code expires in {formatTime(timeLeft)}</span>
             </div>
@@ -183,7 +210,7 @@ export default function VerifyOTPPage() {
             <button
               onClick={handleVerify}
               disabled={loading || !allFilled || timeLeft === 0}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200"
+              className="w-full bg-primary-500 hover:bg-primary-600 disabled:bg-secondary-400 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200"
             >
               {loading ? (
                 <div className="flex items-center justify-center gap-2">
@@ -199,7 +226,7 @@ export default function VerifyOTPPage() {
               <button
                 onClick={handleResend}
                 disabled={loading || timeLeft > 240}
-                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:text-gray-400 disabled:cursor-not-allowed text-sm font-medium"
+                className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 disabled:text-secondary-400 disabled:cursor-not-allowed text-sm font-medium"
               >
                 Resend Code
               </button>

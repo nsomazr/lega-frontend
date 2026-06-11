@@ -9,6 +9,7 @@ import Header from '@/components/Header';
 import { X } from 'lucide-react';
 import { isSessionExpiredShown, markSessionExpired, isRedirectInProgress, setRedirectInProgress, resetSessionState } from '@/lib/sessionManager';
 import ProfileCompletionModal from '@/components/ProfileCompletionModal';
+import { OfflineModeProvider } from '@/lib/OfflineModeContext';
 
 interface User {
   id: number;
@@ -38,53 +39,81 @@ export default function DashboardLayout({
   const router = useRouter();
 
   useEffect(() => {
-    // Only run on client side
     if (typeof window === 'undefined') return;
-    
+
     const token = localStorage.getItem('access_token');
     if (!token) {
-        router.push('/auth');
+      router.push('/auth');
       return;
     }
 
-    // Set a maximum timeout to prevent infinite loading (6 seconds)
     const timeoutId = setTimeout(() => {
-      console.error('Authentication timeout - redirecting to login');
+      console.error('Authentication timeout - backend may be slow or unreachable');
+      setLoading(false);
+      setUser(null);
+      if (!isSessionExpiredShown() && !isRedirectInProgress()) {
+        markSessionExpired();
+        setRedirectInProgress(true);
+        localStorage.removeItem('access_token');
+        window.location.href = '/auth?message=Connection timeout. Please try again.';
+      }
+    }, 30000);
+
+    const redirectToLogin = () => {
+      clearTimeout(timeoutId);
       setLoading(false);
       setUser(null);
       localStorage.removeItem('access_token');
-    }, 6000);
-
-    const fetchUser = async () => {
-      try {
-        const response = await api.get('/api/auth/me');
-        clearTimeout(timeoutId);
-        setUser(response.data);
-        setLoading(false);
-      } catch (error: any) {
-        clearTimeout(timeoutId);
-        console.error('Error fetching user:', error);
-        setLoading(false);
-        setUser(null);
-        // Remove token on any error
-        if (error.response?.status === 401 || error.response?.status === 403) {
-          localStorage.removeItem('access_token');
-          // Only redirect if we're not already on login page and session expiration not already handled
-          if (typeof window !== 'undefined' && !window.location.pathname.includes('/auth')) {
-            if (!isSessionExpiredShown() && !isRedirectInProgress()) {
-              markSessionExpired();
-              setRedirectInProgress(true);
-              router.push('/auth?message=Session expired. Please sign in again.');
-            }
-          }
+      if (typeof window !== 'undefined' && !window.location.pathname.includes('/auth')) {
+        if (!isSessionExpiredShown() && !isRedirectInProgress()) {
+          markSessionExpired();
+          setRedirectInProgress(true);
+          router.push('/auth?message=Session expired. Please sign in again.');
         }
       }
     };
 
-    fetchUser();
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [200, 400, 600];
 
-    // Cleanup timeout on unmount
-    return () => clearTimeout(timeoutId);
+    const fetchUser = async (attempt = 0) => {
+      const tokenNow = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      if (!tokenNow) {
+        redirectToLogin();
+        return;
+      }
+      try {
+        const response = await api.get('/api/auth/me', {
+          headers: { Authorization: `Bearer ${tokenNow}` },
+        });
+        clearTimeout(timeoutId);
+        setUser(response.data);
+        setLoading(false);
+      } catch (error: any) {
+        const isAuthError = error.response?.status === 401 || error.response?.status === 403;
+        if (isAuthError && attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS[attempt] ?? 600;
+          await new Promise((r) => setTimeout(r, delay));
+          fetchUser(attempt + 1);
+          return;
+        }
+        if (isAuthError) {
+          redirectToLogin();
+        } else {
+          clearTimeout(timeoutId);
+          setLoading(false);
+          setUser(null);
+        }
+      }
+    };
+
+    // Delay so token from previous page (after login redirect) is committed and available
+    const startId = setTimeout(() => fetchUser(0), 200);
+
+    return () => {
+      clearTimeout(timeoutId);
+      clearTimeout(startId);
+    };
   }, [router]);
 
   // Check if profile is complete and show modal if needed
@@ -149,7 +178,7 @@ export default function DashboardLayout({
             <div className="absolute top-0 left-0 w-16 h-16 border-4 border-transparent border-t-primary-500 rounded-full animate-spin"></div>
           </div>
           <div className="text-center">
-            <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">Loading Lega</h3>
+            <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">Loading MeLT</h3>
             <p className="text-sm text-secondary-600 dark:text-secondary-400">Setting up your workspace...</p>
           </div>
         </div>
@@ -186,46 +215,48 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-secondary-50 dark:bg-secondary-900">
-      {/* Mobile sidebar overlay */}
-      {mobileSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
-      )}
-      
-      <div className="flex">
-        {/* Sidebar - visible on mobile when toggled, always visible on desktop */}
-        <div className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto transform transition-transform duration-300 ease-in-out ${
-          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        }`}>
-          <Sidebar user={user} collapsed={sidebarCollapsed} />
-        </div>
-        
-        <div className="flex-1 flex flex-col min-w-0">
-          <Header 
-            user={user} 
-            onToggleSidebar={toggleSidebar}
-            onToggleMobileSidebar={toggleMobileSidebar}
-            mobileSidebarOpen={mobileSidebarOpen}
+    <OfflineModeProvider>
+      <div className="min-h-screen bg-secondary-50 dark:bg-secondary-900">
+        {/* Mobile sidebar overlay */}
+        {mobileSidebarOpen && (
+          <div 
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setMobileSidebarOpen(false)}
           />
-          <main className="flex-1 p-4 sm:p-6 animate-fade-in">
-            <div className="max-w-7xl mx-auto w-full">
-              {children}
-            </div>
-          </main>
+        )}
+        
+        <div className="flex">
+          {/* Sidebar - visible on mobile when toggled, always visible on desktop */}
+          <div className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto transform transition-transform duration-300 ease-in-out ${
+            mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+          }`}>
+            <Sidebar user={user} collapsed={sidebarCollapsed} />
+          </div>
+          
+          <div className="flex-1 flex flex-col min-w-0">
+            <Header 
+              user={user} 
+              onToggleSidebar={toggleSidebar}
+              onToggleMobileSidebar={toggleMobileSidebar}
+              mobileSidebarOpen={mobileSidebarOpen}
+            />
+            <main className="flex-1 p-4 sm:p-6 animate-fade-in">
+              <div className="max-w-7xl mx-auto w-full">
+                {children}
+              </div>
+            </main>
+          </div>
         </div>
-      </div>
       
-      {/* Profile Completion Modal */}
-      {showProfileModal && user && (
-        <ProfileCompletionModal
-          user={user}
-          onComplete={refreshUser}
-          onClose={() => setShowProfileModal(false)}
-        />
-      )}
-    </div>
+        {/* Profile Completion Modal */}
+        {showProfileModal && user && (
+          <ProfileCompletionModal
+            user={user}
+            onComplete={refreshUser}
+            onClose={() => setShowProfileModal(false)}
+          />
+        )}
+      </div>
+    </OfflineModeProvider>
   );
 }

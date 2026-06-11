@@ -111,7 +111,7 @@ export default function CompleteProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-background dark:to-accent-950">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-secondary-900 dark:to-accent-950">
       <ToastContainer toasts={toasts} onClose={removeToast} />
       
       <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">

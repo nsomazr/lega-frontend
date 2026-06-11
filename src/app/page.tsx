@@ -115,7 +115,7 @@ export default function LandingPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-background dark:to-accent-950">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-secondary-900 dark:to-accent-950">
       {/* Support assistant - visible on landing page */}
       <WelcomeGuide storageKey="lega_has_seen_welcome_v2" />
       {/* Navigation */}
@@ -126,7 +126,7 @@ export default function LandingPage() {
               <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-lg">
                 <Scale className="h-6 w-6 text-white" />
               </div>
-              <span className="text-xl font-bold gradient-text">Lega</span>
+              <span className="text-xl font-bold gradient-text">MeLT</span>
             </div>
             <div className="flex items-center space-x-4">
               <ThemeToggle />
@@ -155,17 +155,13 @@ export default function LandingPage() {
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
-          <div className="inline-flex items-center px-4 py-2 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-sm font-medium mb-6">
-            <Zap className="h-4 w-4 mr-2" />
-            Your Legal Matters Made Simple
-          </div>
           <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold text-secondary-900 dark:text-secondary-100 mb-6 leading-tight">
             Manage Your Legal
             <span className="gradient-text"> Matters Easily</span>
             <br />All in One Place
           </h1>
           <p className="text-xl sm:text-2xl text-secondary-600 dark:text-secondary-400 max-w-3xl mx-auto mb-8">
-            Whether you're a lawyer managing cases or someone needing legal help, Lega makes everything simple. 
+            Whether you're a lawyer managing cases or someone needing legal help, MeLT makes everything simple. 
             Organize your documents, track your cases, and get the support you need.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -391,7 +387,7 @@ export default function LandingPage() {
               Ready to Get Started?
             </h2>
             <p className="text-xl mb-8 text-white/90">
-              Join Lega today and make managing your legal matters easy. It's free to start, no credit card needed.
+              Join MeLT today and make managing your legal matters easy. It's free to start, no credit card needed.
             </p>
             {!token && (
               <Link
@@ -424,7 +420,7 @@ export default function LandingPage() {
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-lg">
                   <Scale className="h-6 w-6 text-white" />
                 </div>
-                <span className="text-xl font-bold gradient-text">Lega</span>
+                <span className="text-xl font-bold gradient-text">MeLT</span>
               </div>
               <p className="text-sm text-secondary-600 dark:text-secondary-400">
                 Professional legal practice management platform.
@@ -488,7 +484,7 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="mt-8 pt-8 border-t border-secondary-200 dark:border-secondary-700 text-center text-sm text-secondary-600 dark:text-secondary-400">
-            © {new Date().getFullYear()} Lega. All rights reserved.
+            © {new Date().getFullYear()} MeLT. All rights reserved.
           </div>
         </div>
       </footer>

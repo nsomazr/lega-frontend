@@ -32,38 +32,62 @@ export default function AuthPage() {
         return;
       }
       
-      // Check for redirect message from other pages
+      // Show redirect message once (e.g. "Session expired") then clear it from URL so it doesn't persist when they try to login
       const message = searchParams.get('message');
       if (message && !messageShownRef.current) {
         messageShownRef.current = true;
         setTimeout(() => {
           showError(message);
         }, 300);
+        // Remove message from URL so a fresh login attempt doesn't keep showing it
+        const url = new URL(window.location.href);
+        url.searchParams.delete('message');
+        window.history.replaceState({}, '', url.pathname + url.search);
       }
     }
   }, [router, searchParams, showError]);
 
-  const handleOTPSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const getErrorMessage = (err: any, fallback: string): string => {
+    const detail = err?.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length) {
+      const first = detail[0];
+      return typeof first === 'object' && first?.msg ? first.msg : String(detail[0]);
+    }
+    return err?.response?.data?.message || err?.message || fallback;
+  };
+
+  const requestOTP = async () => {
+    const value = identifier.trim();
+    if (!value) {
+      showError('Please enter your email or phone number');
+      return;
+    }
     setLoading(true);
-
     try {
-      const response = await api.post('/api/auth/request-otp', {
-        identifier: identifier.trim()
-      });
-
+      const response = await api.post('/api/auth/request-otp', { identifier: value });
       if (response.data.success) {
-        success(response.data.message || 'Verification code sent successfully');
-        // Redirect to OTP verification page with identifier
+        success(response.data.message || 'Verification code sent');
+        // Delay redirect so browser extensions (password managers, etc.) can respond
+        // and avoid "message channel closed before a response was received" in console
         setTimeout(() => {
-          router.push(`/auth/verify-otp?identifier=${encodeURIComponent(identifier.trim())}`);
-        }, 500);
+          router.push(`/auth/verify-otp?identifier=${encodeURIComponent(value)}`);
+        }, 600);
       }
     } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || err.message || 'Failed to send verification code';
-      showError(errorMessage);
+      const msg =
+        err?.code === 'ECONNABORTED' || err?.message?.toLowerCase?.().includes('timeout')
+          ? 'Request timed out. Check that the backend is running and try again.'
+          : getErrorMessage(err, 'Failed to send verification code. Check your email/phone and try again.');
+      showError(msg);
+    } finally {
       setLoading(false);
     }
+  };
+
+  const handleOTPSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await requestOTP();
   };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
@@ -93,25 +117,19 @@ export default function AuthPage() {
         const hasPlaceholderName = user.full_name && (user.full_name.startsWith('User ') || user.full_name.includes('@temp.melt'));
         
         if (isProfileIncomplete || hasPlaceholderName) {
-          // Redirect to onboarding for incomplete profiles
           success('Welcome! Please complete your profile.');
-          setTimeout(() => {
-            router.push('/auth/onboarding');
-          }, 1000);
+          await new Promise((r) => setTimeout(r, 300));
+          window.location.href = '/auth/onboarding';
         } else {
-          // Profile is complete, go to dashboard
           success('Welcome back! Redirecting...');
-          setTimeout(() => {
-            router.push('/dashboard');
-          }, 1000);
+          await new Promise((r) => setTimeout(r, 300));
+          window.location.href = '/dashboard';
         }
       } catch (userErr: any) {
-        // If we can't fetch user, still redirect to dashboard (DashboardLayout will handle profile check)
         console.error('Error fetching user profile:', userErr);
         success('Welcome back! Redirecting...');
-        setTimeout(() => {
-          router.push('/dashboard');
-        }, 1000);
+        await new Promise((r) => setTimeout(r, 300));
+        window.location.href = '/dashboard';
       }
     } catch (err: any) {
       const detail = err.response?.data?.detail || err.message;
@@ -131,8 +149,7 @@ export default function AuthPage() {
             }, 1000);
           }
         }).catch((otpErr: any) => {
-          const otpErrorMsg = otpErr.response?.data?.detail || 'Failed to send verification code';
-          showError(`Account not found. ${otpErrorMsg}`);
+          showError(`Account not found. ${getErrorMessage(otpErr, 'Failed to send verification code')}`);
           setLoading(false);
         });
         return;
@@ -161,7 +178,7 @@ export default function AuthPage() {
   const isEmail = identifier.includes('@');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-background dark:to-accent-950 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-background to-accent-50 dark:from-primary-950 dark:via-secondary-900 dark:to-accent-950 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
@@ -254,12 +271,21 @@ export default function AuthPage() {
               <>
                 <button
                   type="button"
-                  onClick={() => setAuthMode('code')}
+                  onClick={requestOTP}
                   disabled={loading || !identifier.trim()}
                   className="w-full flex items-center justify-center gap-2 btn-primary btn-lg group"
                 >
-                  <span>Continue with code</span>
-                  <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      <span>Sending code...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Send verification code</span>
+                      <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
                 </button>
 
                 <button
@@ -277,7 +303,8 @@ export default function AuthPage() {
             {authMode === 'code' && (
               <>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={requestOTP}
                   disabled={loading || !identifier.trim()}
                   className="w-full flex items-center justify-center gap-2 btn-primary btn-lg group"
                 >
@@ -288,7 +315,7 @@ export default function AuthPage() {
                     </>
                   ) : (
                     <>
-                      <span>Continue with code</span>
+                      <span>Resend verification code</span>
                       <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
                     </>
                   )}

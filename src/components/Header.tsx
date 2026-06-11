@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Search, Menu, X, PanelLeft, User, LogOut, Settings } from 'lucide-react';
-import { ThemeToggle } from './ThemeToggle';
+import { Bell, Menu, X, PanelLeft, LogOut, Settings, Wifi, WifiOff } from 'lucide-react';
+import { useOfflineMode } from '@/lib/OfflineModeContext';
 
 interface User {
   id: number;
@@ -23,8 +23,8 @@ interface HeaderProps {
 
 export default function Header({ user, onToggleSidebar, onToggleMobileSidebar, mobileSidebarOpen = false }: HeaderProps) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [searchFocused, setSearchFocused] = useState(false);
   const router = useRouter();
+  const { isOnline, setOnlineMode } = useOfflineMode();
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
@@ -72,33 +72,34 @@ export default function Header({ user, onToggleSidebar, onToggleMobileSidebar, m
             </div>
           </div>
 
-          {/* Search */}
-          <div className="flex-1 flex items-center justify-center px-2 lg:ml-6 lg:justify-end">
-            <div className="max-w-lg w-full lg:max-w-xs">
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search className={`h-4 w-4 transition-colors ${
-                    searchFocused ? 'text-primary-500' : 'text-muted-foreground'
-                  }`} />
-                </div>
-                <input
-                  className={`input pl-10 pr-4 transition-all duration-200 ${
-                    searchFocused ? 'ring-2 ring-primary-500 border-primary-500' : ''
-                  }`}
-                  placeholder="Search cases, documents..."
-                  type="search"
-                  onFocus={() => setSearchFocused(true)}
-                  onBlur={() => setSearchFocused(false)}
-                  aria-label="Search"
-                />
-              </div>
-            </div>
-          </div>
-
           {/* Right side */}
           <div className="flex items-center space-x-2">
-            {/* Theme Toggle */}
-            <ThemeToggle />
+            {/* Offline / Online mode switch - platform is offline first */}
+            <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-secondary-100 dark:bg-secondary-800 border border-secondary-200 dark:border-secondary-700">
+              <span className={`text-xs font-medium hidden sm:inline ${isOnline ? 'text-primary-600 dark:text-primary-400' : 'text-secondary-600 dark:text-secondary-400'}`}>
+                {isOnline ? 'Online' : 'Offline'}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isOnline}
+                aria-label={isOnline ? 'Switch to offline mode' : 'Switch to online mode'}
+                onClick={() => setOnlineMode(!isOnline)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                  isOnline ? 'bg-primary-500' : 'bg-secondary-400 dark:bg-secondary-600'
+                }`}
+              >
+                <span className="sr-only">{isOnline ? 'Online' : 'Offline'}</span>
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                    isOnline ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className={isOnline ? 'text-primary-500 dark:text-primary-400' : 'text-secondary-500 dark:text-secondary-400'} title={isOnline ? 'TanzLii, web search and other online services are available' : 'Using local data only. Switch to Online for TanzLii and web search.'}>
+                {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+              </span>
+            </div>
 
             {/* Notifications */}
             <button

@@ -203,9 +203,10 @@ function CasesPageContent() {
     try {
       const response = await api.get('/api/cases');
       setCases(response.data);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching cases:', error);
-      showError('Failed to fetch cases');
+      // For new users / empty state: show empty list, no toast
+      setCases([]);
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { ToastContainer, useToast } from '@/components/Toast';
 import api from '@/lib/api';
@@ -75,6 +75,7 @@ export default function DocumentsPage() {
   const [bulkMoveDest, setBulkMoveDest] = useState('/');
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [bulkActionType, setBulkActionType] = useState<'move' | 'copy'>('move');
+  const permissionErrorShownRef = useRef(false);
 
   // Sync uploadFolder with currentFolder whenever it changes
   useEffect(() => {
@@ -116,13 +117,43 @@ export default function DocumentsPage() {
     fetchFolders();
   }, []);
 
+  // Refetch when page becomes visible (e.g. after uploading from Chat and switching back)
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDocuments();
+        fetchFolders();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
   const fetchDocuments = async () => {
     try {
       const response = await api.get('/api/documents');
-      setDocuments(response.data);
-    } catch (error) {
+      const data = response.data;
+      setDocuments(Array.isArray(data) ? data : []);
+      permissionErrorShownRef.current = false; // reset so a later 403 can show again
+    } catch (error: any) {
       console.error('Error fetching documents:', error);
-      showError('Failed to fetch documents');
+      setDocuments([]);
+      const status = error?.response?.status;
+      const message = error?.response?.data?.detail || error?.message;
+      if (status === 403) {
+        // Show once per "visit" to avoid duplicate toasts (e.g. React Strict Mode or double fetch)
+        if (!permissionErrorShownRef.current) {
+          permissionErrorShownRef.current = true;
+          const detail = typeof message === 'string' ? message : 'You don\'t have permission to view documents.';
+          showError(detail);
+        }
+      } else if (status === 401) {
+        showError('Please sign in again to view documents.');
+      } else if (message) {
+        showError(typeof message === 'string' ? message : 'Could not load documents. Please try again.');
+      } else {
+        showError('Could not load documents. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

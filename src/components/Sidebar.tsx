@@ -152,15 +152,15 @@ function UpgradeButton({ user, collapsed }: { user: User; collapsed: boolean }) 
       href="/plans"
       className={cn(
         'w-full group flex items-center rounded-xl transition-all duration-200 relative overflow-hidden',
-        'bg-gradient-to-br from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600',
-        'shadow-md hover:shadow-lg shadow-blue-500/20 dark:shadow-purple-500/20',
-        'hover:shadow-blue-500/30 dark:hover:shadow-purple-500/30',
+        'bg-gradient-to-br from-primary-500 to-primary-700 hover:from-primary-600 hover:to-primary-800',
+        'shadow-md hover:shadow-lg shadow-primary-500/20 dark:shadow-primary-500/20',
+        'hover:shadow-primary-500/30 dark:hover:shadow-primary-500/30',
         collapsed ? 'justify-center px-3 py-2.5' : 'justify-start px-3 py-2.5'
       )}
       title={collapsed ? 'Upgrade to Pro' : 'Upgrade to Pro'}
     >
       {/* Subtle glowing effect */}
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-400/30 to-purple-400/30 opacity-50 blur-sm animate-pulse rounded-xl"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-primary-400/30 to-primary-600/30 opacity-50 blur-sm animate-pulse rounded-xl"></div>
       
       {/* Content */}
       <div className="relative flex items-center z-10">
@@ -177,7 +177,7 @@ function UpgradeButton({ user, collapsed }: { user: User; collapsed: boolean }) 
       </div>
       
       {/* Subtle hover glow effect */}
-      <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-blue-400/20 to-purple-400/20 opacity-0 group-hover:opacity-100 blur-md transition-opacity duration-300 pointer-events-none"></div>
+      <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary-400/20 to-primary-600/20 opacity-0 group-hover:opacity-100 blur-md transition-opacity duration-300 pointer-events-none"></div>
     </Link>
   );
 }
@@ -210,7 +210,7 @@ export default function Sidebar({ user, collapsed = false }: SidebarProps) {
             {!collapsed && (
               <div className="flex flex-col">
                 <span className="text-xl font-bold gradient-text">MeLT</span>
-                <span className="text-xs text-secondary-600 dark:text-secondary-400">Msomi e-Legal Tool</span>
+                <span className="text-xs text-secondary-600 dark:text-secondary-400">MeLT</span>
               </div>
             )}
           </div>

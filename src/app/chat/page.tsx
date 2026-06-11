@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { ToastContainer, useToast } from '@/components/Toast';
 import api from '@/lib/api';
+import { useOfflineMode } from '@/lib/OfflineModeContext';
 import { LawyerRecommendation } from '@/components/LawyerRecommendation';
 import { useRouter } from 'next/navigation';
 import { useAutocorrect } from '@/lib/useAutocorrect';
@@ -35,7 +36,12 @@ import {
   Users,
   Search,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  Brain,
+  BookOpen,
+  Landmark
 } from 'lucide-react';
 
 interface ChatSession {
@@ -46,18 +52,56 @@ interface ChatSession {
   messageCount: number;
 }
 
+interface ResponseVersion {
+  content: string;
+  thinking_trace?: string;
+  sources?: any[];
+}
+
 interface ChatMessage {
   id: number;
   content: string;
   is_user: boolean;
   created_at: string;
   isStreaming?: boolean;
+  /** Thinking/reasoning trace from thinking models (e.g. Qwen, DeepSeek R1). Shown in a dropdown when present. */
+  thinking_trace?: string;
+  sources?: any[];
+  /** Multiple response versions from retry/edit+resend; navigate with responseVersionIndex */
+  responseVersions?: ResponseVersion[];
+  responseVersionIndex?: number;
 }
 
 interface Document {
   id: number;
   original_filename: string;
   summary: string;
+}
+
+function ThinkingTraceDropdown({ trace }: { trace: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 border border-secondary-200 dark:border-secondary-700 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-secondary-700 dark:text-secondary-300 bg-secondary-50 dark:bg-secondary-800/50 hover:bg-secondary-100 dark:hover:bg-secondary-700/50 transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <Brain className="h-4 w-4 text-primary-500" />
+          Thinking trace
+        </span>
+        {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+      </button>
+      {open && (
+        <div className="px-3 py-2 border-t border-secondary-200 dark:border-secondary-700 bg-secondary-50/50 dark:bg-secondary-900/30">
+          <pre className="text-xs text-secondary-600 dark:text-secondary-400 whitespace-pre-wrap font-sans max-h-64 overflow-y-auto">
+            {trace.trim()}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ChatContent() {
@@ -74,13 +118,18 @@ function ChatContent() {
   const [sending, setSending] = useState(false);
   const [selectedDocuments, setSelectedDocuments] = useState<number[]>([]); // Max 3
   const [selectedCase, setSelectedCase] = useState<number | null>(null); // Max 1
+  const [selectedConstitution, setSelectedConstitution] = useState<string | null>(null); // 'tanzania' | 'zanzibar'
   const [useTanzLii, setUseTanzLii] = useState(false);
   const [useWebSearch, setUseWebSearch] = useState(false);
+  const [maxWebSources, setMaxWebSources] = useState(5);
+  const [useParliament, setUseParliament] = useState(false);
+  const [useZanzibarAssembly, setUseZanzibarAssembly] = useState(false);
   const [showModeSelector, setShowModeSelector] = useState(false); // Toggle between web search and file upload
   const [allDocuments, setAllDocuments] = useState<any[]>([]);
   const [allCases, setAllCases] = useState<any[]>([]);
   const [showDocumentSelector, setShowDocumentSelector] = useState(false);
   const [showCaseSelector, setShowCaseSelector] = useState(false);
+  const [showConstitutionSelector, setShowConstitutionSelector] = useState(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -99,11 +148,16 @@ function ChatContent() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** All previous response versions to merge when new response arrives (from retry/edit) */
+  const pendingPreviousVersionsRef = useRef<ResponseVersion[] | null>(null);
   // Response style/tone removed from UI and requests
   // Models fetched from backend (fallback includes Default)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  /** Just-uploaded doc info so the "selected for context" badge shows immediately before allDocuments refreshes */
+  const [lastUploadedDoc, setLastUploadedDoc] = useState<{ id: number; original_filename: string } | null>(null);
   const [uploadedImageBase64, setUploadedImageBase64] = useState<string | null>(null);
   const { toasts, success, error: showError, warning, info, removeToast } = useToast();
+  const { isOnline } = useOfflineMode();
 
   useEffect(() => {
     fetchCurrentUser();
@@ -202,20 +256,21 @@ function ChatContent() {
       }
     }
     
-    // For documents, upload them to the document system
+    // For documents, upload them to the document system (folder_path so they appear in Documents dashboard Root)
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
+      formData.append('folder_path', '/');
+
       const response = await api.post('/api/documents/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
       const uploadedDoc = response.data;
-      const newSelected = [...selectedDocuments, uploadedDoc.id].slice(0, 3);
-      setSelectedDocuments(newSelected);
+      setLastUploadedDoc({ id: uploadedDoc.id, original_filename: uploadedDoc.original_filename });
+      setSelectedDocuments([uploadedDoc.id]);
       await fetchAllDocuments();
-      success(`Document "${uploadedDoc.original_filename}" uploaded and selected`);
+      success(`Document "${uploadedDoc.original_filename}" added to context`);
     } catch (error: any) {
       showError(error.response?.data?.detail || 'Failed to upload document');
     } finally {
@@ -226,6 +281,13 @@ function ChatContent() {
     }
   };
 
+  // Clear lastUploadedDoc once the uploaded doc appears in allDocuments (so the selector list shows it from the main list)
+  useEffect(() => {
+    if (lastUploadedDoc && allDocuments.some((d) => d.id === lastUploadedDoc!.id)) {
+      setLastUploadedDoc(null);
+    }
+  }, [lastUploadedDoc, allDocuments]);
+
   // Close selectors when clicking elsewhere
   useEffect(() => {
     const handleGlobalClick = (ev: MouseEvent) => {
@@ -234,12 +296,15 @@ function ChatContent() {
         setShowDocumentSelector(false);
         setShowCaseSelector(false);
       }
+      if (!target.closest('[data-mode-selector]')) {
+        setShowModeSelector(false);
+      }
     };
-    if (showDocumentSelector || showCaseSelector) {
+    if (showDocumentSelector || showCaseSelector || showModeSelector) {
       window.document.addEventListener('click', handleGlobalClick);
       return () => window.document.removeEventListener('click', handleGlobalClick);
     }
-  }, [showDocumentSelector, showCaseSelector]);
+  }, [showDocumentSelector, showCaseSelector, showModeSelector]);
 
   // Close any open session menu when clicking elsewhere
   useEffect(() => {
@@ -283,13 +348,19 @@ function ChatContent() {
     } catch {}
   }, [showArchived]);
 
+  const lastFetchErrorDocRef = useRef<string | null>(null);
   const fetchDocument = async () => {
+    if (!documentId) return;
     try {
       const response = await api.get(`/api/documents/${documentId}`);
       setDocument(response.data);
+      lastFetchErrorDocRef.current = null;
     } catch (error) {
       console.error('Error fetching document:', error);
-      showError('Failed to load document');
+      if (lastFetchErrorDocRef.current !== documentId) {
+        lastFetchErrorDocRef.current = documentId;
+        showError('Failed to load document');
+      }
     }
   };
 
@@ -390,16 +461,28 @@ function ChatContent() {
     const aiMsg = messages[idx];
     if (aiMsg.is_user) return;
 
-    // Find the most recent preceding user message to retry
     let promptToRetry = '';
     for (let i = idx - 1; i >= 0; i--) {
       if (messages[i].is_user) { promptToRetry = messages[i].content; break; }
     }
     if (!promptToRetry) return;
 
-    // Remove the AI message we are retrying and resend using the original user prompt
+    pendingPreviousVersionsRef.current = aiMsg.responseVersions?.length
+      ? [...aiMsg.responseVersions]
+      : [{ content: aiMsg.content, thinking_trace: aiMsg.thinking_trace, sources: aiMsg.sources }];
     setMessages(prev => prev.filter(m => m.id !== messageId));
     await sendMessage(promptToRetry, true);
+  };
+
+  const setResponseVersion = (messageId: number, delta: number) => {
+    setMessages(prev => prev.map(m => {
+      if (m.id !== messageId || !m.responseVersions?.length) return m;
+      const idx = m.responseVersionIndex ?? m.responseVersions.length - 1;
+      const next = Math.max(0, Math.min(m.responseVersions.length - 1, idx + delta));
+      const v = m.responseVersions[next];
+      if (!v) return m;
+      return { ...m, responseVersionIndex: next, content: v.content, thinking_trace: v.thinking_trace, sources: v.sources };
+    }));
   };
 
   const editMessage = (messageId: number) => {
@@ -412,14 +495,25 @@ function ChatContent() {
 
   const saveEdit = async (messageId: number) => {
     if (!editContent.trim()) return;
-    
-    setMessages(prev => prev.map(m => 
-      m.id === messageId ? { ...m, content: editContent } : m
-    ));
+
+    const idx = messages.findIndex(m => m.id === messageId);
+    if (idx === -1) return;
+    const nextMsg = messages[idx + 1];
+    if (nextMsg && !nextMsg.is_user) {
+      pendingPreviousVersionsRef.current = nextMsg.responseVersions?.length
+        ? [...nextMsg.responseVersions]
+        : [{ content: nextMsg.content, thinking_trace: nextMsg.thinking_trace, sources: nextMsg.sources }];
+    } else {
+      pendingPreviousVersionsRef.current = null;
+    }
+
+    setMessages(prev => {
+      let next = nextMsg ? prev.filter(m => m.id !== nextMsg.id) : prev;
+      return next.map(m => m.id === messageId ? { ...m, content: editContent } : m);
+    });
     setEditingMessage(null);
     setEditContent('');
-    
-    // Resend the edited message
+
     await sendMessage(editContent, true);
   };
 
@@ -445,12 +539,16 @@ function ChatContent() {
 
     try {
       let response;
-      
-      // Build context from selections
-      const documentIds = documentId ? [parseInt(documentId)] : selectedDocuments;
+      const trimmedContent = content.trim();
+
+      // Build context from selections (TanzLii and Web Search only when online)
+      const docIdNum = documentId ? parseInt(documentId, 10) : NaN;
+      const documentIds = !isNaN(docIdNum) ? [docIdNum] : selectedDocuments;
       const caseId = selectedCase;
-      const useTanzLiiFlag = useTanzLii;
-      const useWebSearchFlag = useWebSearch;
+      const useTanzLiiFlag = isOnline && useTanzLii;
+      // Auto-enable web search for clear current-events / information-seeking queries when online
+      const looksLikeCurrentEvents = /\b(what('s| is) happening|what('s| is) going on|current (events?|news)|news (about|from)|latest (news|on)|what happened)\b/i.test(trimmedContent);
+      const useWebSearchFlag = isOnline && (useWebSearch || looksLikeCurrentEvents);
       
       // Debug log
       console.log('DEBUG: Sending message with context:', {
@@ -473,97 +571,7 @@ function ChatContent() {
           await fetchChatSessions();
         }
 
-      // Always use query-documents endpoint when documentId is present or when context is selected or when image is present or when web search is enabled
-      if (documentIds.length > 0 || caseId || useTanzLiiFlag || documentId || uploadedImageBase64 || useWebSearchFlag) {
-        // Enhanced chat with context - get response then save to session
-        const controller = new AbortController();
-        controllerRef.current = controller;
-        const requestPayload: any = {
-          query: content,
-          use_tanzlii: useTanzLiiFlag,
-          use_web_search: useWebSearchFlag
-        };
-        // Include image if present
-        if (uploadedImageBase64) {
-          requestPayload.image_base64 = uploadedImageBase64;
-        }
-        // Always include document_ids if we have documentId from URL or selected documents
-        if (documentIds.length > 0) {
-          requestPayload.document_ids = documentIds;
-        } else if (documentId) {
-          // Fallback: ensure documentId from URL is included
-          const docId = parseInt(documentId);
-          if (!isNaN(docId)) {
-            requestPayload.document_ids = [docId];
-          }
-        }
-        if (caseId) {
-          requestPayload.case_id = caseId;
-        }
-        // Include session_id for conversation history
-        if (currentSessionId) {
-          requestPayload.session_id = currentSessionId;
-        }
-        console.log('DEBUG: Sending query with context:', { ...requestPayload, image_base64: uploadedImageBase64 ? '[present]' : '[none]' });
-        response = await api.post('/api/chat/query-documents', requestPayload, { signal: controller.signal });
-        
-        // Clear uploaded image after sending
-        if (uploadedImageBase64) {
-          setUploadedImageBase64(null);
-          setUploadedFile(null);
-        }
-        
-        // Save messages to session after getting response
-        try {
-          let responseContent = response.data?.response 
-            ? response.data.response 
-            : (response.data?.content || response.data?.message || '');
-          
-          // If sources are provided, they're already included in the response
-          // But we can also handle them separately if needed
-          const sources = response.data?.sources;
-          
-          // Save user message
-          await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { 
-            content,
-            message_type: 'user'
-          });
-          
-          // Save assistant response (includes sources if present)
-          const assistantMessage: ChatMessage = {
-            id: Date.now() + 1,
-            content: responseContent,
-            is_user: false,
-            created_at: new Date().toISOString(),
-            sources: sources || undefined
-          };
-          setMessages(prev => [...prev, assistantMessage]);
-          
-          await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { 
-            content: responseContent,
-            message_type: 'assistant'
-          });
-        } catch (saveError) {
-          console.error('Error saving messages to session:', saveError);
-          // Continue even if saving fails
-        }
-      } else {
-        // General chat without context - use standard endpoint that saves messages
-        const controller = new AbortController();
-        controllerRef.current = controller;
-        const requestPayload: any = {
-          content,
-          document_ids: documentIds.length > 0 ? documentIds : undefined,
-          case_id: caseId || undefined,
-          use_tanzlii: useTanzLiiFlag
-        };
-        if (useWebSearchFlag) {
-          requestPayload.use_web_search = true;
-        }
-        response = await api.post(`/api/chat/sessions/${sessionId}/messages`, requestPayload, { signal: controller.signal });
-      }
-
-      // Create AI message placeholder
+      // Create AI message placeholder first (so we can stream into it)
       const aiMessageId = Date.now() + 1;
       const aiMessage: ChatMessage = {
         id: aiMessageId,
@@ -572,49 +580,260 @@ function ChatContent() {
         created_at: new Date().toISOString(),
         isStreaming: true
       };
-
       setMessages(prev => [...prev, aiMessage]);
-      // Handle response based on endpoint used
-      // query-documents returns {response: ..., sources: ...}
-      // sessions/{id}/messages returns {content: ...}
-      const responseContent = response.data?.response 
-        ? response.data.response 
-        : (response.data?.content || response.data?.message || '');
-      const sources = response.data?.sources;
-      setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: responseContent, isStreaming: false, sources: sources || undefined } : m));
 
-      // After assistant reply in general chat, auto-summarize session title
-      if (!documentId && currentSessionId) {
+      // Greeting-only messages: use session chat so the reply is a simple greeting (no document/news context)
+      const isGreeting = /^\s*(hey|hi|hello|hey!|hi!|hello!|greetings?|howdy)\s*!?\s*$/i.test(trimmedContent);
+
+      // Use query-documents only when we have context AND it's not just a greeting
+      const useParliamentFlag = isOnline && useParliament;
+      const useZanzibarFlag = isOnline && useZanzibarAssembly;
+      if (!isGreeting && (selectedConstitution || documentIds.length > 0 || caseId || useTanzLiiFlag || useParliamentFlag || useZanzibarFlag || documentId || uploadedImageBase64 || useWebSearchFlag)) {
+        const controller = new AbortController();
+        controllerRef.current = controller;
+        const requestPayload: any = {
+          query: content,
+          use_tanzlii: useTanzLiiFlag,
+          use_web_search: useWebSearchFlag,
+          use_parliament: useParliamentFlag,
+          use_zanzibar_assembly: useZanzibarFlag,
+        };
+        if (useWebSearchFlag) requestPayload.max_web_sources = Math.max(1, Math.min(20, maxWebSources));
+        if (uploadedImageBase64) requestPayload.image_base64 = uploadedImageBase64;
+        if (selectedConstitution) requestPayload.constitution = selectedConstitution;
+        if (documentIds.length > 0) {
+          requestPayload.document_ids = documentIds;
+        } else if (documentId) {
+          const parsed = parseInt(documentId, 10);
+          if (!isNaN(parsed)) requestPayload.document_ids = [parsed];
+        }
+        if (caseId) requestPayload.case_id = caseId;
+        if (currentSessionId) requestPayload.session_id = parseInt(currentSessionId, 10) || undefined;
+
+        if (!uploadedImageBase64) {
+          const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+          const res = await fetch('/api/chat/query-documents/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            body: JSON.stringify(requestPayload),
+            signal: controller.signal,
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || res.statusText || 'Stream failed');
+          }
+          const reader = res.body?.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let sources: any[] | null = null;
+          let streamContent = '';
+          let streamThinking = '';
+          while (reader) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const data = JSON.parse(line);
+                if (data.done && data.sources !== undefined) {
+                  sources = data.sources;
+                  continue;
+                }
+                if (data.content) {
+                  streamContent += data.content;
+                  setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: streamContent } : m));
+                }
+                if (data.thinking) {
+                  streamThinking += data.thinking;
+                  setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, thinking_trace: streamThinking } : m));
+                }
+                if (data.done) {
+                  setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, isStreaming: false, sources: sources || undefined } : m));
+                }
+              } catch (_) {}
+            }
+          }
+          const prevVersions = pendingPreviousVersionsRef.current;
+          pendingPreviousVersionsRef.current = null;
+          setMessages(prev => prev.map(m => {
+            if (m.id !== aiMessageId) return m;
+            const v = { content: streamContent, thinking_trace: streamThinking, sources: sources || undefined };
+            if (prevVersions?.length) {
+              const versions = [...prevVersions, v];
+              return { ...m, ...v, isStreaming: false, responseVersions: versions, responseVersionIndex: versions.length - 1 };
+            }
+            return { ...m, ...v, isStreaming: false };
+          }));
+          try {
+            await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { content, message_type: 'user' });
+            let assistantContent = streamContent;
+            if (sources?.length) assistantContent += '\n\n' + sources.map((s: any) => `[${s.title || 'Source'}](${s.url || ''})`).join('\n');
+            await api.post(`/api/chat/sessions/${sessionId}/messages/save`, {
+              content: assistantContent,
+              message_type: 'assistant',
+              ...(streamThinking ? { thinking_trace: streamThinking } : {}),
+            });
+          } catch (saveError) {
+            console.error('Error saving messages to session:', saveError);
+          }
+          if (!documentId && currentSessionId) {
+            try {
+              const title = generateSessionTitle(content);
+              await api.put(`/api/chat/sessions/${currentSessionId}`, { session_name: title });
+            } catch {}
+            fetchChatSessions();
+          }
+          response = undefined as any;
+        } else {
+          response = await api.post('/api/chat/query-documents', requestPayload, { signal: controller.signal });
+          setUploadedImageBase64(null);
+          setUploadedFile(null);
+        }
+      } else {
+        // General chat (or greeting): use streaming session endpoint so tokens stream in
+        const controller = new AbortController();
+        controllerRef.current = controller;
+        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+        const res = await fetch(`/api/chat/sessions/${sessionId}/messages/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ content, message_type: 'user' }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || res.statusText || 'Stream failed');
+        }
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamContent = '';
+        let streamThinking = '';
+        while (reader) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+              if (data.content) {
+                streamContent += data.content;
+                setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: streamContent } : m));
+              }
+              if (data.thinking) {
+                streamThinking += data.thinking;
+                setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, thinking_trace: streamThinking } : m));
+              }
+              if (data.done) {
+                setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, isStreaming: false } : m));
+              }
+            } catch (_) {}
+          }
+        }
+        const prevVersions = pendingPreviousVersionsRef.current;
+        pendingPreviousVersionsRef.current = null;
+        setMessages(prev => prev.map(m => {
+          if (m.id !== aiMessageId) return m;
+          const v = { content: streamContent, thinking_trace: streamThinking };
+          if (prevVersions?.length) {
+            const versions = [...prevVersions, v];
+            return { ...m, ...v, isStreaming: false, responseVersions: versions, responseVersionIndex: versions.length - 1 };
+          }
+          return { ...m, ...v, isStreaming: false };
+        }));
         try {
-          const title = generateSessionTitle(content);
-          await api.put(`/api/chat/sessions/${currentSessionId}`, { session_name: title });
+          await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { content, message_type: 'user' });
+          await api.post(`/api/chat/sessions/${sessionId}/messages/save`, {
+            content: streamContent,
+            message_type: 'assistant',
+            ...(streamThinking ? { thinking_trace: streamThinking } : {}),
+          });
+        } catch (saveError) {
+          console.error('Error saving messages to session:', saveError);
+        }
+        if (currentSessionId) {
+          try {
+            const title = generateSessionTitle(content);
+            await api.put(`/api/chat/sessions/${currentSessionId}`, { session_name: title });
+          } catch {}
           fetchChatSessions();
-        } catch {}
+        }
+        response = undefined as any;
+      }
+
+      // When we have a non-stream response (e.g. query-documents with image), update placeholder and save
+      if (response?.data) {
+        const responseContent = response.data?.response ?? response.data?.content ?? response.data?.message ?? '';
+        const sources = response.data?.sources;
+        const thinkingTrace = response.data?.thinking_trace;
+        const prevVersions = pendingPreviousVersionsRef.current;
+        pendingPreviousVersionsRef.current = null;
+        const v = { content: responseContent, thinking_trace: thinkingTrace, sources: sources || undefined };
+        setMessages(prev => prev.map(m => {
+          if (m.id !== aiMessageId) return m;
+          if (prevVersions?.length) {
+            const versions = [...prevVersions, v];
+            return { ...m, ...v, isStreaming: false, responseVersions: versions, responseVersionIndex: versions.length - 1 };
+          }
+          return { ...m, ...v, isStreaming: false };
+        }));
+        try {
+          await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { content, message_type: 'user' });
+          await api.post(`/api/chat/sessions/${sessionId}/messages/save`, { content: responseContent, message_type: 'assistant', ...(thinkingTrace ? { thinking_trace: thinkingTrace } : {}) });
+        } catch (saveError) {
+          console.error('Error saving messages to session:', saveError);
+        }
+        if (!documentId && currentSessionId) {
+          try {
+            const title = generateSessionTitle(content);
+            await api.put(`/api/chat/sessions/${currentSessionId}`, { session_name: title });
+          } catch {}
+          fetchChatSessions();
+        }
       }
     } catch (error: any) {
       console.error('Error sending message:', error);
-      
-      // Provide helpful error message
-      let errorMessage = 'Failed to send message. Please try again.';
-      if (error.response?.status === 403) {
+
+      // Detect offline / network failure so we can show a clear message
+      const isOffline =
+        (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        error?.message === 'Failed to fetch' ||
+        error?.name === 'TypeError' ||
+        error?.code === 'ERR_NETWORK' ||
+        (error?.request && !error?.response);
+
+      let errorMessage: string;
+      if (isOffline) {
+        errorMessage = "You're offline. Please check your internet connection and try again.";
+      } else if (error.response?.status === 403) {
         errorMessage = 'You do not have permission to access this document.';
       } else if (error.response?.status === 404) {
         errorMessage = 'Document not found. Please refresh and try again.';
       } else if (error.response?.status === 500) {
         errorMessage = 'Service is temporarily unavailable. Please try again later.';
+      } else {
+        errorMessage = 'Failed to send message. Please try again.';
       }
-      
+
       showError(errorMessage);
-      
-      // Add error message to chat
+
+      // Remove the streaming placeholder and show a single error message in chat
       const errorChatMessage: ChatMessage = {
         id: Date.now() + 1,
-        content: `I apologize, but I'm having trouble processing your request right now. ${errorMessage}`,
+        content: isOffline
+          ? "You're offline. Please check your internet connection and try again."
+          : `I apologize, but I'm having trouble processing your request right now. ${errorMessage}`,
         is_user: false,
         created_at: new Date().toISOString()
       };
-      
-      setMessages(prev => [...prev, errorChatMessage]);
+
+      setMessages(prev => prev.filter(m => m.id !== aiMessageId).concat(errorChatMessage));
     } finally {
       setSending(false);
       controllerRef.current = null;
@@ -702,6 +921,7 @@ function ChatContent() {
         content: m.content,
         is_user: m.message_type === 'user',
         created_at: m.created_at,
+        thinking_trace: m.thinking_trace,
       }));
       setMessages(msgs);
     } catch {
@@ -711,16 +931,14 @@ function ChatContent() {
 
   if (loading) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
-        </div>
-      </DashboardLayout>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+      </div>
     );
   }
 
   return (
-    <DashboardLayout>
+    <>
       <ToastContainer toasts={toasts} onClose={removeToast} />
       <div className="h-screen flex flex-col bg-secondary-50 dark:bg-secondary-900">
         {/* Modern Header */}
@@ -728,23 +946,17 @@ function ChatContent() {
           <div className="px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                {/* Mobile sidebar toggle for general chat */}
+                {/* Sidebar toggle for general chat (mobile + desktop) */}
                 {!documentId && (
                   <button
                     onClick={() => setSidebarOpen(!sidebarOpen)}
-                    className="md:hidden p-2 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors"
+                    className="p-2 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors"
+                    title={sidebarOpen ? 'Close chat history' : 'Open chat history'}
+                    aria-label={sidebarOpen ? 'Close chat history' : 'Open chat history'}
                   >
                     <Menu className="h-5 w-5 text-secondary-600 dark:text-secondary-400" />
                   </button>
                 )}
-                
-                <button
-                  onClick={() => window.history.back()}
-                  className="flex items-center px-3 py-2 text-secondary-600 dark:text-secondary-400 hover:text-secondary-900 dark:hover:text-secondary-100 hover:bg-secondary-100 dark:hover:bg-secondary-700 rounded-lg transition-all duration-200"
-                >
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  {documentId ? 'Back to Documents' : 'Back to Dashboard'}
-                </button>
                 
                 <div className="flex items-center space-x-3">
                   <div className="p-2 bg-primary-600 rounded-xl shadow-lg">
@@ -752,16 +964,16 @@ function ChatContent() {
                   </div>
                   <div>
                     <h1 className="text-xl font-bold text-secondary-900 dark:text-secondary-100">
-                      {documentId ? 'Document Chat' : 'MeLT Assistant'}
+                      {documentId ? 'Document Chat' : 'MeLT (Msomi e-Legal Tool)'}
                     </h1>
                     <p className="text-sm text-secondary-600 dark:text-secondary-400 font-medium">
-                      {documentId ? (documentName || 'Loading...') : 'General MeLT Assistant'}
+                      {documentId ? (documentName || 'Loading...') : 'Your legal assistant for cases, documents, and legal research'}
                     </p>
                   </div>
                 </div>
               </div>
               <div className="flex items-center space-x-2">
-                <div className="px-3 py-1 bg-success-100 text-success-800 dark:bg-success-900/20 dark:text-success-400 rounded-full text-xs font-medium">
+                <div className="px-3 py-1 bg-success-100 text-success-800 dark:bg-success-900/20 dark:text-success-400 rounded-full text-xs font-medium" title="Msomi e-Legal Tool">
                   MeLT
                 </div>
               </div>
@@ -781,9 +993,11 @@ function ChatContent() {
                 />
               )}
               
-              {/* Sidebar */}
-              <div className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto ${historyCollapsed ? 'w-14' : 'w-80'} bg-white dark:bg-secondary-800 border-r border-secondary-200 dark:border-secondary-700 transform transition-transform duration-300 ease-in-out ${
-                sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+              {/* Sidebar - collapsible on all screen sizes */}
+              <div className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto flex-shrink-0 bg-white dark:bg-secondary-800 border-r border-secondary-200 dark:border-secondary-700 transform transition-all duration-300 ease-in-out ${
+                sidebarOpen
+                  ? `${historyCollapsed ? 'w-14' : 'w-80'} translate-x-0`
+                  : 'w-0 min-w-0 -translate-x-full md:translate-x-0 overflow-hidden'
               }`}>
                 <div className="flex flex-col h-full">
                   {/* Sidebar Header */}
@@ -908,26 +1122,6 @@ function ChatContent() {
 
             {/* Modern Chat Messages */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-              {/* Document Filename at Top of Chat Area */}
-              {document && (
-                <div className="sticky top-0 z-10 -mx-6 px-6 py-3 bg-white/95 dark:bg-secondary-900/95 backdrop-blur-sm border-b border-secondary-200 dark:border-secondary-700 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-primary-600 rounded-lg">
-                      <FileText className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100 truncate">
-                        {document.original_filename}
-                      </h3>
-                      {document.summary && (
-                        <p className="text-xs text-secondary-600 dark:text-secondary-400 truncate mt-0.5">
-                          {document.summary.length > 60 ? `${document.summary.slice(0, 60)}...` : document.summary}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
               {messages.length === 0 ? (
                 <div className="text-center py-16">
                   <div className="mx-auto w-20 h-20 bg-primary-600 rounded-2xl flex items-center justify-center shadow-lg mb-6">
@@ -981,10 +1175,10 @@ function ChatContent() {
                     <div className={`max-w-2xl ${message.is_user ? 'order-2' : 'order-1'}`}>
                       {!message.is_user && (
                         <div className="flex items-center space-x-2 mb-2">
-                          <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
+                          <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center" title="MeLT (Msomi e-Legal Tool)">
                             <MessageCircle className="h-4 w-4 text-white" />
                           </div>
-                          <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">MeLT</span>
+                          <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300" title="Msomi e-Legal Tool – your legal assistant">MeLT</span>
                         </div>
                       )}
                       <div
@@ -1022,6 +1216,12 @@ function ChatContent() {
                             <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
                           ) : (
                             <>
+                              {/* Reasoning above the response */}
+                              {message.thinking_trace && message.thinking_trace.trim() && (
+                                <div className="mb-3">
+                                  <ThinkingTraceDropdown trace={message.thinking_trace} />
+                                </div>
+                              )}
                               <div className="prose prose-sm dark:prose-invert max-w-none">
                                 <ReactMarkdown>{message.content}</ReactMarkdown>
                               </div>
@@ -1073,9 +1273,9 @@ function ChatContent() {
                           <p className="text-xs">
                             {new Date(message.created_at).toLocaleTimeString()}
                             {message.isStreaming && (
-                              <span className="ml-2 inline-flex items-center">
-                                <div className="w-2 h-2 bg-current rounded-full animate-pulse mr-1"></div>
-                                Typing...
+                              <span className="ml-2 inline-flex items-center gap-1">
+                                <div className="w-2 h-2 bg-current rounded-full animate-pulse" />
+                                Thinking...
                               </span>
                             )}
                           </p>
@@ -1101,6 +1301,29 @@ function ChatContent() {
                               </>
                             ) : (
                               <>
+                                {message.responseVersions && message.responseVersions.length > 1 && (
+                                  <div className="flex items-center gap-0.5 mr-2 text-xs text-secondary-500 dark:text-secondary-400">
+                                    <button
+                                      onClick={() => setResponseVersion(message.id, -1)}
+                                      disabled={(message.responseVersionIndex ?? message.responseVersions.length - 1) <= 0}
+                                      className="p-1 rounded hover:bg-secondary-200 dark:hover:bg-secondary-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      title="Previous response"
+                                    >
+                                      <ChevronLeft className="h-3 w-3" />
+                                    </button>
+                                    <span className="min-w-[2.5rem] text-center">
+                                      {(message.responseVersionIndex ?? message.responseVersions.length - 1) + 1}/{message.responseVersions.length}
+                                    </span>
+                                    <button
+                                      onClick={() => setResponseVersion(message.id, 1)}
+                                      disabled={(message.responseVersionIndex ?? message.responseVersions.length - 1) >= message.responseVersions.length - 1}
+                                      className="p-1 rounded hover:bg-secondary-200 dark:hover:bg-secondary-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      title="Next response"
+                                    >
+                                      <ChevronRight className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                )}
                                 <button
                                   onClick={() => copyToClipboard(message.content)}
                                   className="p-1 rounded hover:bg-secondary-200 dark:hover:bg-secondary-600 transition-colors"
@@ -1137,21 +1360,22 @@ function ChatContent() {
                 ))
               )}
               
-              {sending && (
+              {/* Single loader: only show when sending and no streaming placeholder yet (e.g. placeholder not in list) */}
+              {sending && !messages.some(m => !m.is_user && m.isStreaming) && (
                 <div className="flex justify-start">
                   <div className="max-w-2xl">
                     <div className="flex items-center space-x-2 mb-2">
-                      <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
+                      <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center" title="MeLT (Msomi e-Legal Tool)">
                         <MessageCircle className="h-4 w-4 text-white" />
                       </div>
-                      <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">Lega</span>
+                      <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300" title="Msomi e-Legal Tool – your legal assistant">MeLT</span>
                     </div>
                     <div className="bg-white dark:bg-secondary-800 border border-secondary-200 dark:border-secondary-700 px-6 py-4 rounded-xl shadow-sm">
                       <div className="flex items-center space-x-3">
                         <div className="flex space-x-1">
-                          <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce"></div>
-                          <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                          <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                          <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" />
+                          <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{animationDelay: '0.1s'}} />
+                          <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}} />
                         </div>
                         <span className="text-sm text-secondary-600 dark:text-secondary-400">MeLT is thinking...</span>
                       </div>
@@ -1182,21 +1406,94 @@ function ChatContent() {
                         ) : (
                           <ChevronDown className="h-3 w-3 text-secondary-400 dark:text-secondary-500" />
                         )}
-                        {(selectedDocuments.length > 0 || selectedCase) && (
+                        {(selectedConstitution || selectedDocuments.length > 0 || selectedCase) && (
                           <span className="ml-auto px-1.5 py-0.5 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full text-[9px] font-medium">
-                            {selectedDocuments.length + (selectedCase ? 1 : 0)}
+                            {(selectedConstitution ? 1 : 0) + selectedDocuments.length + (selectedCase ? 1 : 0)}
                           </span>
                         )}
                       </button>
                       
                       {contextSectionExpanded && (
                         <div className="flex flex-wrap items-center gap-1.5 pl-2 pt-1">
+                          {/* Constitution Selection - First */}
+                          <div className="relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowConstitutionSelector(!showConstitutionSelector);
+                                setShowDocumentSelector(false);
+                                setShowCaseSelector(false);
+                              }}
+                              className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
+                                selectedConstitution
+                                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
+                                  : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
+                              }`}
+                              data-constitution-selector
+                              title="Select constitution for context"
+                            >
+                              <BookOpen className="h-3 w-3" />
+                              <span className="text-[10px]">Constitution {selectedConstitution && `(${selectedConstitution === 'tanzania' ? 'Tanzania' : 'Zanzibar'})`}</span>
+                            </button>
+                            {showConstitutionSelector && (
+                              <div className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50" data-constitution-selector>
+                                <div className="p-3 border-b border-secondary-200 dark:border-secondary-700">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <h4 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100">Select Constitution</h4>
+                                    {selectedConstitution && (
+                                      <button
+                                        onClick={() => {
+                                          setSelectedConstitution(null);
+                                          setShowConstitutionSelector(false);
+                                        }}
+                                        className="text-xs text-error-600 hover:text-error-700"
+                                      >
+                                        Clear
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-secondary-600 dark:text-secondary-400">Choose a constitution to use as context for retrieval</p>
+                                </div>
+                                <div className="p-2">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedConstitution('tanzania');
+                                      setShowConstitutionSelector(false);
+                                    }}
+                                    className={`w-full text-left p-2 rounded-lg transition-colors ${
+                                      selectedConstitution === 'tanzania'
+                                        ? 'bg-primary-50 dark:bg-primary-900/20'
+                                        : 'hover:bg-secondary-50 dark:hover:bg-secondary-700/50'
+                                    }`}
+                                  >
+                                    <p className="text-xs font-medium text-secondary-900 dark:text-secondary-100">Tanzania Constitution</p>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedConstitution('zanzibar');
+                                      setShowConstitutionSelector(false);
+                                    }}
+                                    className={`w-full text-left p-2 rounded-lg transition-colors ${
+                                      selectedConstitution === 'zanzibar'
+                                        ? 'bg-primary-50 dark:bg-primary-900/20'
+                                        : 'hover:bg-secondary-50 dark:hover:bg-secondary-700/50'
+                                    }`}
+                                  >
+                                    <p className="text-xs font-medium text-secondary-900 dark:text-secondary-100">Zanzibar Constitution</p>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
                           {/* Document Selection */}
                           <div className="relative">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             setShowDocumentSelector(!showDocumentSelector);
+                            setShowConstitutionSelector(false);
+                            setShowCaseSelector(false);
                           }}
                           className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
                             selectedDocuments.length > 0
@@ -1204,6 +1501,7 @@ function ChatContent() {
                               : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
                           }`}
                           data-document-selector
+                          title="Select documents for context"
                         >
                           <FileText className="h-3 w-3" />
                           <span className="text-[10px]">Docs {selectedDocuments.length > 0 && `(${selectedDocuments.length}/3)`}</span>
@@ -1213,23 +1511,29 @@ function ChatContent() {
                             <div className="p-3 border-b border-secondary-200 dark:border-secondary-700">
                               <div className="flex items-center justify-between mb-2">
                                 <h4 className="text-sm font-semibold text-secondary-900 dark:text-secondary-100">Select Documents (max 3)</h4>
-                                <button
-                                  onClick={() => {
-                                    setSelectedDocuments([]);
-                                    setShowDocumentSelector(false);
-                                  }}
-                                  className="text-xs text-error-600 hover:text-error-700"
-                                >
-                                  Clear
-                                </button>
+                                {selectedDocuments.length > 0 && (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDocuments([]);
+                                      setShowDocumentSelector(false);
+                                    }}
+                                    className="text-xs text-error-600 hover:text-error-700"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
                               </div>
                               <p className="text-xs text-secondary-600 dark:text-secondary-400">Choose up to 3 documents to use as context</p>
                             </div>
                             <div className="p-2">
-                              {allDocuments.length === 0 ? (
-                                <p className="text-xs text-secondary-500 dark:text-secondary-400 p-3 text-center">No documents available</p>
-                              ) : (
-                                allDocuments.map((doc) => {
+                              {(() => {
+                                const listForSelection = lastUploadedDoc
+                                  ? [{ id: lastUploadedDoc.id, original_filename: lastUploadedDoc.original_filename, case_id: null } as const, ...allDocuments.filter((d) => d.id !== lastUploadedDoc.id)]
+                                  : allDocuments;
+                                return listForSelection.length === 0 ? (
+                                  <p className="text-xs text-secondary-500 dark:text-secondary-400 p-3 text-center">No documents available. Upload a document via the + button below.</p>
+                                ) : (
+                                  listForSelection.map((doc) => {
                                   const isSelected = selectedDocuments.includes(doc.id);
                                   const canSelect = isSelected || selectedDocuments.length < 3;
                                   return (
@@ -1269,7 +1573,8 @@ function ChatContent() {
                                     </label>
                                   );
                                 })
-                              )}
+                                );
+                              })()}
                             </div>
                           </div>
                         )}
@@ -1281,6 +1586,8 @@ function ChatContent() {
                           onClick={(e) => {
                             e.stopPropagation();
                             setShowCaseSelector(!showCaseSelector);
+                            setShowConstitutionSelector(false);
+                            setShowDocumentSelector(false);
                           }}
                           className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
                             selectedCase
@@ -1343,42 +1650,6 @@ function ChatContent() {
                       )}
                     </div>
 
-                    {/* Search Options Section - Compact */}
-                    <div className="flex flex-wrap items-center gap-1.5 border-t border-secondary-200/50 dark:border-secondary-700/50 pt-1.5">
-                      <span className="text-[10px] font-medium text-secondary-500 dark:text-secondary-400 px-1.5 py-0.5">Search:</span>
-                      
-                      {/* TanzLii Toggle */}
-                      <button
-                        onClick={() => setUseTanzLii(!useTanzLii)}
-                        className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
-                          useTanzLii
-                            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
-                            : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
-                        }`}
-                      >
-                        <FileText className="h-3 w-3" />
-                        <span className="text-[10px]">TanzLii</span>
-                      </button>
-
-                      {/* Web Search Toggle */}
-                      <button
-                        onClick={() => {
-                          setUseWebSearch(!useWebSearch);
-                          if (useWebSearch) {
-                            setUploadedFile(null);
-                            setUploadedImageBase64(null);
-                          }
-                        }}
-                        className={`px-2 py-1 rounded-md text-[10px] border transition-colors flex items-center gap-1.5 ${
-                          useWebSearch
-                            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
-                            : 'bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700'
-                        }`}
-                      >
-                        <Search className="h-3 w-3" />
-                        <span className="text-[10px]">Web Search</span>
-                      </button>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1398,32 +1669,6 @@ function ChatContent() {
                       <span>explore lawyers portal</span>
                       <ArrowLeft className="h-3 w-3 rotate-180" />
                     </button>
-                  </div>
-                )}
-                
-                {/* Selected Documents Display - Cancellable badges */}
-                {selectedDocuments.length > 0 && !documentId && (
-                  <div className="mb-3 flex flex-wrap items-center gap-2">
-                    {selectedDocuments.map((docId) => {
-                      const doc = allDocuments.find((d) => d.id === docId);
-                      return doc ? (
-                        <div
-                          key={docId}
-                          className="px-3 py-1.5 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-lg flex items-center gap-2 text-sm border border-primary-300 dark:border-primary-700"
-                        >
-                          <FileText className="h-3.5 w-3.5 flex-shrink-0" />
-                          <span className="truncate max-w-[200px]">{doc.original_filename}</span>
-                          <button
-                            onClick={() => setSelectedDocuments(selectedDocuments.filter((id) => id !== docId))}
-                            className="ml-1 p-0.5 rounded hover:bg-primary-200 dark:hover:bg-primary-800 transition-colors flex-shrink-0"
-                            title="Remove document"
-                            aria-label="Remove document"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ) : null;
-                    })}
                   </div>
                 )}
                 
@@ -1479,29 +1724,52 @@ function ChatContent() {
                           setShowModeSelector(!showModeSelector);
                         }}
                         className="h-9 w-9 rounded-full hover:bg-secondary-100 dark:hover:bg-secondary-700 transition-colors flex items-center justify-center shrink-0"
-                        title="Toggle between web search and file upload"
+                        title="Upload file"
                         aria-label="Toggle mode"
                         data-mode-selector
                       >
-                        <Plus className={`h-4 w-4 text-secondary-500 dark:text-secondary-400 ${(useWebSearch || uploadedFile) ? 'text-primary-500 dark:text-primary-400' : ''}`} />
+                        <Plus className={`h-4 w-4 text-secondary-500 dark:text-secondary-400 ${(useWebSearch || useTanzLii || useParliament || useZanzibarAssembly || uploadedFile) ? 'text-primary-500 dark:text-primary-400' : ''}`} />
                       </button>
-                      {/* Mode selector dropdown */}
+                      {/* Plus dropdown: Upload, Web Search, Tanzania Parliament, Zanzibar Assembly, TanzLii */}
                       {showModeSelector && (
-                        <div className="absolute bottom-full right-0 mb-2 w-48 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50" data-mode-selector>
+                        <div className="absolute bottom-full right-0 mb-2 w-56 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-lg shadow-lg z-50" data-mode-selector>
                           <div className="p-2">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setUseWebSearch(true);
-                                setUploadedFile(null);
-                                setUploadedImageBase64(null);
-                                if (fileInputRef.current) fileInputRef.current.value = '';
+                                setUseWebSearch(false);
+                                fileInputRef.current?.click();
                                 setShowModeSelector(false);
                               }}
                               className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
-                                useWebSearch
+                                uploadedFile
                                   ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                                   : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
+                              }`}
+                            >
+                              <Upload className="h-4 w-4" />
+                              Upload
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isOnline) {
+                                  setUseWebSearch(!useWebSearch);
+                                  if (useWebSearch) {
+                                    setUploadedFile(null);
+                                    setUploadedImageBase64(null);
+                                  }
+                                }
+                                setShowModeSelector(false);
+                              }}
+                              disabled={!isOnline}
+                              title={!isOnline ? 'Switch to Online in the navbar to use Web Search' : undefined}
+                              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 mt-1 ${
+                                !isOnline
+                                  ? 'opacity-60 cursor-not-allowed text-secondary-500 dark:text-secondary-400'
+                                  : useWebSearch
+                                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                                    : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
                               }`}
                             >
                               <Search className="h-4 w-4" />
@@ -1510,18 +1778,59 @@ function ChatContent() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setUseWebSearch(false);
-                                fileInputRef.current?.click();
+                                if (isOnline) setUseParliament(!useParliament);
                                 setShowModeSelector(false);
                               }}
+                              disabled={!isOnline}
+                              title={!isOnline ? 'Switch to Online to use Tanzania Parliament' : undefined}
                               className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 mt-1 ${
-                                uploadedFile
-                                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                                  : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
+                                !isOnline
+                                  ? 'opacity-60 cursor-not-allowed text-secondary-500 dark:text-secondary-400'
+                                  : useParliament
+                                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                                    : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
                               }`}
                             >
-                              <Upload className="h-4 w-4" />
-                              Upload File
+                              <Landmark className="h-4 w-4" />
+                              Tanzania Parliament
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isOnline) setUseZanzibarAssembly(!useZanzibarAssembly);
+                                setShowModeSelector(false);
+                              }}
+                              disabled={!isOnline}
+                              title={!isOnline ? 'Switch to Online to use Zanzibar Assembly' : undefined}
+                              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 mt-1 ${
+                                !isOnline
+                                  ? 'opacity-60 cursor-not-allowed text-secondary-500 dark:text-secondary-400'
+                                  : useZanzibarAssembly
+                                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                                    : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
+                              }`}
+                            >
+                              <Landmark className="h-4 w-4" />
+                              Zanzibar Assembly
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isOnline) setUseTanzLii(!useTanzLii);
+                                setShowModeSelector(false);
+                              }}
+                              disabled={!isOnline}
+                              title={!isOnline ? 'Switch to Online in the navbar to use TanzLii' : undefined}
+                              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 mt-1 ${
+                                !isOnline
+                                  ? 'opacity-60 cursor-not-allowed text-secondary-500 dark:text-secondary-400'
+                                  : useTanzLii
+                                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                                    : 'hover:bg-secondary-50 dark:hover:bg-secondary-700 text-secondary-700 dark:text-secondary-300'
+                              }`}
+                            >
+                              <Gavel className="h-4 w-4" />
+                              TanzLii
                             </button>
                           </div>
                         </div>
@@ -1535,18 +1844,75 @@ function ChatContent() {
                         accept=".pdf,.doc,.docx,.txt,.csv,.xls,.xlsx,.md,.json,.xml,.jpg,.jpeg,.png,.gif,.webp,image/*"
                         disabled={uploadingFile || useWebSearch}
                       />
-                      {/* Web search indicator - only show when web search is enabled */}
-                      {useWebSearch && (
+                      {/* TanzLii indicator - show when TanzLii is enabled */}
+                      {useTanzLii && (
                         <button
                           onClick={() => {
-                            setUseWebSearch(false);
+                            setUseTanzLii(false);
                             setShowModeSelector(false);
                           }}
                           className="h-9 w-9 rounded-full hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors flex items-center justify-center shrink-0"
-                          title="Disable web search"
-                          aria-label="Disable web search"
+                          title="Disable TanzLii"
+                          aria-label="Disable TanzLii"
                         >
-                          <Search className="h-4 w-4 text-primary-500 dark:text-primary-400" />
+                          <Gavel className="h-4 w-4 text-primary-500 dark:text-primary-400" />
+                        </button>
+                      )}
+                      {/* Web search indicator - only show when web search is enabled */}
+                      {useWebSearch && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <select
+                            value={maxWebSources}
+                            onChange={(e) => setMaxWebSources(Math.max(1, Math.min(20, Number(e.target.value))))}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-8 px-2 text-xs rounded-lg border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-700 dark:text-secondary-300 focus:ring-2 focus:ring-primary-500"
+                            title="Number of web sources (1–20)"
+                            aria-label="Max web sources"
+                          >
+                            {[3, 5, 8, 10, 15, 20].map((n) => (
+                              <option key={n} value={n}>{n}</option>
+                            ))}
+                          </select>
+                          <span className="text-[10px] text-secondary-500 dark:text-secondary-400 hidden sm:inline">sources</span>
+                          <button
+                            onClick={() => {
+                              setUseWebSearch(false);
+                              setShowModeSelector(false);
+                            }}
+                            className="h-9 w-9 rounded-full hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors flex items-center justify-center shrink-0"
+                            title="Disable web search"
+                            aria-label="Disable web search"
+                          >
+                            <Search className="h-4 w-4 text-primary-500 dark:text-primary-400" />
+                          </button>
+                        </div>
+                      )}
+                      {/* Tanzania Parliament indicator */}
+                      {useParliament && (
+                        <button
+                          onClick={() => {
+                            setUseParliament(false);
+                            setShowModeSelector(false);
+                          }}
+                          className="h-9 w-9 rounded-full hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors flex items-center justify-center shrink-0"
+                          title="Disable Tanzania Parliament"
+                          aria-label="Disable Tanzania Parliament"
+                        >
+                          <Landmark className="h-4 w-4 text-primary-500 dark:text-primary-400" />
+                        </button>
+                      )}
+                      {/* Zanzibar Assembly indicator */}
+                      {useZanzibarAssembly && (
+                        <button
+                          onClick={() => {
+                            setUseZanzibarAssembly(false);
+                            setShowModeSelector(false);
+                          }}
+                          className="h-9 w-9 rounded-full hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors flex items-center justify-center shrink-0"
+                          title="Disable Zanzibar Assembly"
+                          aria-label="Disable Zanzibar Assembly"
+                        >
+                          <Landmark className="h-4 w-4 text-primary-500 dark:text-primary-400" />
                         </button>
                       )}
                       {newMessage.trim() && (
@@ -1570,7 +1936,7 @@ function ChatContent() {
                   </p>
                   <div className="flex items-center space-x-2">
                     <div className="w-2 h-2 bg-success-500 rounded-full"></div>
-                    <span className="text-xs text-secondary-500 dark:text-secondary-400">MeLT Ready</span>
+                    <span className="text-xs text-secondary-500 dark:text-secondary-400" title="MeLT (Msomi e-Legal Tool) – ready for your message">MeLT Ready</span>
                   </div>
                 </div>
               </div>
@@ -1596,7 +1962,16 @@ function ChatContent() {
                 className="px-4 py-2 rounded-md border border-secondary-300 dark:border-secondary-600 text-secondary-800 dark:text-secondary-100 hover:bg-secondary-100 dark:hover:bg-secondary-700"
               >Cancel</button>
               <button
-                onClick={async ()=>{ try{ await api.put(`/api/chat/sessions/${renameModal.id}`, { session_name: renameModal.name }); setRenameModal({open:false, id:'', name:''}); fetchChatSessions(); success('Chat renamed'); } catch{ showError('Failed to rename'); } }}
+                onClick={async ()=>{
+                  try {
+                    await api.put(`/api/chat/sessions/${renameModal.id}`, { session_name: renameModal.name });
+                    setRenameModal({open:false, id:'', name:''});
+                    fetchChatSessions();
+                    success('Chat renamed');
+                  } catch (e: any) {
+                    showError(e?.response?.data?.detail || 'Failed to rename');
+                  }
+                }}
                 className="inline-flex items-center gap-2 px-5 py-2 rounded-md text-white bg-primary-600 hover:bg-primary-700"
               >Save</button>
             </div>
@@ -1625,14 +2000,14 @@ function ChatContent() {
           </div>
         </div>
       )}
-    </DashboardLayout>
+    </>
   );
 }
 
 export default function DocumentChatPage() {
   return (
-    <Suspense fallback={
-      <DashboardLayout>
+    <DashboardLayout>
+      <Suspense fallback={
         <div className="flex items-center justify-center h-64">
           <div className="flex flex-col items-center space-y-4">
             <div className="relative">
@@ -1642,9 +2017,9 @@ export default function DocumentChatPage() {
             <p className="text-sm text-secondary-600 dark:text-secondary-400">Loading chat...</p>
           </div>
         </div>
-      </DashboardLayout>
-    }>
-      <ChatContent />
-    </Suspense>
+      }>
+        <ChatContent />
+      </Suspense>
+    </DashboardLayout>
   );
 }

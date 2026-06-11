@@ -1,8 +1,8 @@
 [package]
 name = "lega-frontend"
 version = "1.0.0"
-description = "Lega Legal Tech Desktop Application"
-authors = ["Lega Team"]
+description = "MeLT Legal Tech Desktop Application"
+authors = ["MeLT Team"]
 license = "MIT"
 repository = ""
 edition = "2021"

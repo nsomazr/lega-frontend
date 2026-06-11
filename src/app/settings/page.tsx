@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { ToastContainer, useToast } from '@/components/Toast';
 import api from '@/lib/api';
-import { User, Mail, Phone, Shield, Key, Bell, Eye, EyeOff, CreditCard, FileText, Zap, ArrowRight } from 'lucide-react';
+import { User, Mail, Phone, Shield, Key, Bell, Eye, EyeOff, CreditCard, FileText, Zap, ArrowRight, Palette, Cpu } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { useRouter } from 'next/navigation';
 
 interface User {
@@ -15,6 +16,12 @@ interface User {
   role: string;
   is_active: boolean;
   created_at: string;
+  preferred_ai_model?: string | null;
+}
+
+interface ModelOption {
+  name: string;
+  label: string;
 }
 
 export default function SettingsPage() {
@@ -36,15 +43,43 @@ export default function SettingsPage() {
   const [pwdModal, setPwdModal] = useState({ open: false });
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
   const [pwdShow, setPwdShow] = useState({ current: false, next: false, confirm: false });
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [modelSaving, setModelSaving] = useState(false);
 
   useEffect(() => {
     fetchUser();
+    fetchModels();
     // Load preferences from localStorage
     try {
       const saved = JSON.parse(localStorage.getItem('user_prefs') || 'null');
       if (saved) setPrefs(saved);
     } catch {}
   }, []);
+
+  const fetchModels = async () => {
+    try {
+      const res = await api.get<{ models: ModelOption[] }>('/api/chat/models');
+      setModels(res.data?.models ?? []);
+    } catch (e) {
+      console.error('Error fetching models:', e);
+    }
+  };
+
+  const handleModelChange = async (modelName: string) => {
+    setModelSaving(true);
+    try {
+      const res = await api.put('/api/auth/me', {
+        preferred_ai_model: modelName || null,
+      });
+      setUser(res.data);
+      success('AI model preference saved');
+    } catch (err) {
+      console.error('Error saving model preference:', err);
+      showError('Failed to save model preference');
+    } finally {
+      setModelSaving(false);
+    }
+  };
 
   const fetchUser = async () => {
     try {
@@ -202,6 +237,27 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* Appearance / Theme */}
+            <div className="card hover-lift">
+              <div className="p-6">
+                <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 mb-6 px-2 flex items-center gap-2">
+                  <Palette className="h-5 w-5 text-primary-500" />
+                  Appearance
+                </h3>
+                <div className="flex items-center justify-between p-4 bg-secondary-50 dark:bg-secondary-800/50 rounded-lg">
+                  <div className="flex-1">
+                    <h4 className="text-sm font-medium text-secondary-900 dark:text-secondary-100 mb-1">
+                      Theme
+                    </h4>
+                    <p className="text-xs text-secondary-600 dark:text-secondary-400">
+                      Light, dark, or follow system
+                    </p>
+                  </div>
+                  <ThemeToggle />
+                </div>
+              </div>
+            </div>
+
             {/* Autocorrection Settings */}
             <div className="card hover-lift">
               <div className="p-6">
@@ -296,6 +352,33 @@ export default function SettingsPage() {
                   <span className={`inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${getRoleColor(user?.role || '')} capitalize`}>{user?.role}</span>
                 </div>
               </div>
+              </div>
+            </div>
+
+            {/* AI Model */}
+            <div className="card hover-lift">
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-6">
+                  <div className="p-2 rounded-lg bg-primary-100 dark:bg-primary-900/30">
+                    <Cpu className="h-5 w-5 text-primary-600 dark:text-primary-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 px-2">AI Model</h3>
+                </div>
+                <p className="text-sm text-secondary-500 dark:text-secondary-400 mb-4 px-2">Choose the AI model used for chat and document queries. Leave as default to use the system default.</p>
+                <div className="px-2">
+                  <select
+                    value={user?.preferred_ai_model ?? ''}
+                    onChange={(e) => handleModelChange(e.target.value)}
+                    disabled={modelSaving}
+                    className="w-full rounded-lg border border-secondary-200 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-900 dark:text-secondary-100 px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60"
+                  >
+                    <option value="">Default (system)</option>
+                    {models.map((m) => (
+                      <option key={m.name} value={m.name}>{m.label || m.name}</option>
+                    ))}
+                  </select>
+                  {modelSaving && <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-2">Saving…</p>}
+                </div>
               </div>
             </div>
 

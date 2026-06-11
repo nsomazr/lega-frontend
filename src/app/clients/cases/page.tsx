@@ -89,7 +89,8 @@ export default function ClientCasesPage() {
       );
       setCases(clientCases);
     } catch (error: any) {
-      showError('Failed to fetch cases');
+      // For new users / empty state: show empty list, no toast
+      setCases([]);
     } finally {
       setLoading(false);
     }

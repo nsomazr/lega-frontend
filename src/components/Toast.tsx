@@ -50,14 +50,14 @@ export function Toast({ id, title, description, type, duration = 5000, onClose, 
 
   const colors = {
     success: 'bg-success-50 border-success-200 text-success-800 dark:bg-success-900/20 dark:border-success-800 dark:text-success-200',
-    error: 'bg-error-50 border-error-200 text-error-800 dark:bg-error-900/20 dark:border-error-800 dark:text-error-200',
+    error: 'bg-warning-50 border-warning-200 text-warning-800 dark:bg-warning-900/20 dark:border-warning-800 dark:text-warning-200',
     warning: 'bg-warning-50 border-warning-200 text-warning-800 dark:bg-warning-900/20 dark:border-warning-800 dark:text-warning-200',
     info: 'bg-primary-50 border-primary-200 text-primary-800 dark:bg-primary-900/20 dark:border-primary-800 dark:text-primary-200',
   };
 
   const iconColors = {
     success: 'text-success-500',
-    error: 'text-error-500',
+    error: 'text-warning-500',
     warning: 'text-warning-500',
     info: 'text-primary-500',
   };

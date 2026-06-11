@@ -35,32 +35,43 @@ export default function AnalyticsPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [sumRes, cSeries, dSeries, chSeries, docs] = await Promise.all([
+        // Load core analytics (summary + timeseries) first
+        const [sumRes, cSeries, dSeries, chSeries] = await Promise.all([
           api.get('/api/analytics/summary'),
           api.get('/api/analytics/timeseries', { params: { metric: 'cases', days: 14 } }),
           api.get('/api/analytics/timeseries', { params: { metric: 'documents', days: 14 } }),
           api.get('/api/analytics/timeseries', { params: { metric: 'chat', days: 14 } }),
-          api.get('/api/documents'),
         ]);
         setSummary(sumRes.data);
         setCasesSeries(cSeries.data.series || []);
         setDocsSeries(dSeries.data.series || []);
         setChatSeries(chSeries.data.series || []);
-        const docsArr = (docs.data || []) as any[];
-        const fileTypeCounts: Record<string, number> = {};
-        docsArr.forEach((d) => {
-          const key = (d.file_type || 'other').toLowerCase();
-          fileTypeCounts[key] = (fileTypeCounts[key] || 0) + 1;
-        });
-        const palette = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4'];
-        const mix = Object.entries(fileTypeCounts)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([label, value], i) => ({ label, value, color: palette[i % palette.length] }));
-        setFileTypeMix(mix);
+
+        // Load documents for file type mix separately so 403 on documents doesn't break the page
+        try {
+          const docsRes = await api.get('/api/documents');
+          const docsArr = (docsRes.data || []) as any[];
+          const fileTypeCounts: Record<string, number> = {};
+          docsArr.forEach((d: any) => {
+            const key = (d.file_type || 'other').toLowerCase();
+            fileTypeCounts[key] = (fileTypeCounts[key] || 0) + 1;
+          });
+          const palette = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4'];
+          const mix = Object.entries(fileTypeCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([label, value], i) => ({ label, value, color: palette[i % palette.length] }));
+          setFileTypeMix(mix);
+        } catch (_) {
+          // File type mix is optional; leave empty on permission or other error
+        }
       } catch (e: any) {
         if (e?.response?.status === 401) {
           router.push('/auth');
+          return;
+        }
+        if (e?.response?.status === 403) {
+          setError('You don’t have permission to view analytics. If you believe you should have access, please contact your administrator.');
           return;
         }
         setError(e?.message || 'Failed to load analytics');
@@ -120,7 +131,9 @@ export default function AnalyticsPage() {
                 </div>
                 <div>
                   <p className="text-sm text-secondary-600 dark:text-secondary-400">{c.label}</p>
-                  <p className="text-2xl font-bold text-secondary-900 dark:text-secondary-100">{c.value}</p>
+                  <p className="text-2xl font-bold text-secondary-900 dark:text-secondary-100">
+                    {c.value === 0 ? 'Not enough data' : c.value}
+                  </p>
                 </div>
               </div>
             </div>
@@ -132,40 +145,64 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">Cases (Last 14 days)</h3>
             </div>
-            <MiniLineChart data={casesSeries} />
+            {casesSeries.length === 0 ? (
+              <p className="text-sm text-secondary-500 dark:text-secondary-400 py-8 text-center">Not enough data</p>
+            ) : (
+              <MiniLineChart data={casesSeries} />
+            )}
           </div>
           <div className="card p-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">Documents (Last 14 days)</h3>
             </div>
-            <MiniLineChart data={docsSeries} />
+            {docsSeries.length === 0 ? (
+              <p className="text-sm text-secondary-500 dark:text-secondary-400 py-8 text-center">Not enough data</p>
+            ) : (
+              <MiniLineChart data={docsSeries} />
+            )}
           </div>
           <div className="card p-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">Chat (Last 14 days)</h3>
             </div>
-            <MiniLineChart data={chatSeries} />
+            {chatSeries.length === 0 ? (
+              <p className="text-sm text-secondary-500 dark:text-secondary-400 py-8 text-center">Not enough data</p>
+            ) : (
+              <MiniLineChart data={chatSeries} />
+            )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="card p-6">
             <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 mb-2">Data Quality</h3>
-            <ul className="text-sm text-secondary-700 dark:text-secondary-300 space-y-2">
-              <li className="flex justify-between"><span>Docs without case</span><span>{summary.docs_without_case}</span></li>
-              <li className="flex justify-between"><span>Docs missing summary</span><span>{summary.docs_missing_summary}</span></li>
-              <li className="flex justify-between"><span>Docs missing tags</span><span>{summary.docs_missing_tags}</span></li>
-            </ul>
+            {totalDocuments === 0 ? (
+              <p className="text-sm text-secondary-500 dark:text-secondary-400 py-4">Not enough data</p>
+            ) : (
+              <ul className="text-sm text-secondary-700 dark:text-secondary-300 space-y-2">
+                <li className="flex justify-between"><span>Docs without case</span><span>{summary.docs_without_case}</span></li>
+                <li className="flex justify-between"><span>Docs missing summary</span><span>{summary.docs_missing_summary}</span></li>
+                <li className="flex justify-between"><span>Docs missing tags</span><span>{summary.docs_missing_tags}</span></li>
+              </ul>
+            )}
           </div>
           <div className="card p-6">
             <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 mb-2">Case Health</h3>
-            <ul className="text-sm text-secondary-700 dark:text-secondary-300 space-y-2">
-              <li className="flex justify-between"><span>Average case age (days)</span><span>{summary.avg_case_age_days}</span></li>
-            </ul>
+            {totalCases === 0 ? (
+              <p className="text-sm text-secondary-500 dark:text-secondary-400 py-4">Not enough data</p>
+            ) : (
+              <ul className="text-sm text-secondary-700 dark:text-secondary-300 space-y-2">
+                <li className="flex justify-between"><span>Average case age (days)</span><span>{summary.avg_case_age_days}</span></li>
+              </ul>
+            )}
           </div>
           <div className="card p-6">
             <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100 mb-4">File Types</h3>
-            <DonutChart data={fileTypeMix} />
+            {fileTypeMix.length === 0 ? (
+              <p className="text-sm text-secondary-500 dark:text-secondary-400 py-8 text-center">Not enough data</p>
+            ) : (
+              <DonutChart data={fileTypeMix} />
+            )}
           </div>
         </div>
       </div>

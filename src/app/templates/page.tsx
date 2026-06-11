@@ -163,9 +163,10 @@ export default function TemplatesPage() {
     try {
       const response = await api.get('/api/templates');
       setTemplates(response.data);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching templates:', error);
-      showError('Failed to fetch templates');
+      // For new users / empty state: show empty list, no toast
+      setTemplates([]);
     } finally {
       setLoading(false);
     }

@@ -1,14 +1,18 @@
 import axios from 'axios';
 import { markSessionExpired, isSessionExpiredShown, isRedirectInProgress, setRedirectInProgress } from './sessionManager';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Call backend directly so Authorization header is never stripped (Next.js rewrite can drop it)
+const API_BASE_URL =
+  typeof window !== 'undefined'
+    ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
+    : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000, // 30 seconds default timeout - increased for slower servers
+  timeout: 30000,
 });
 
 // Add auth token to requests and extend timeout for chat/AI endpoints
@@ -72,7 +76,7 @@ api.interceptors.request.use((config) => {
     }
   }
   
-  // Extend timeout for endpoints that may take longer due to slow servers or complex queries
+  // Extend timeout for endpoints that may take longer (request-otp gets 25s so we don't hang if backend/SMTP is slow)
   const slowEndpoints = [
     '/api/chat/query-documents',
     '/api/chat/sessions',
@@ -92,29 +96,65 @@ api.interceptors.request.use((config) => {
   if (isSlowEndpoint) {
     config.timeout = 120000; // 2 minutes for slow requests
   }
+  // OTP request: backend returns immediately (store+send in background); allow 25s for slow networks
+  if (config.url?.includes('/api/auth/request-otp')) {
+    config.timeout = 25000; // 25s – response is instant; extra margin for slow backend/network
+  }
   
   return config;
 });
 
+// Login/signup endpoints: never redirect with "session expired" so the page can show the real error
+const LOGIN_FLOW_PATHS = [
+  '/api/auth/login',
+  '/api/auth/request-otp',
+  '/api/auth/verify-otp',
+  '/api/auth/continue-without-password',
+  '/api/auth/set-password',
+];
+
+// Caller handles redirect (e.g. DashboardLayout retries /api/auth/me once before redirecting)
+const AUTH_ME_PATH = '/api/auth/me';
+
 // Handle auth errors - don't auto-redirect on login page to prevent refresh loops
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
+  async (error) => {
+    if (typeof window === 'undefined') return Promise.reject(error);
+
+    const status = error.response?.status;
+    const detail = (error.response?.data?.detail ?? '').toString();
+    const requestUrl = error.config?.url ?? '';
+    const retryCount = error.config?.__retryCount ?? 0;
+    // 401 = invalid/expired token; 403 with "Not authenticated" = missing token (FastAPI HTTPBearer default)
+    const isAuthFailure = status === 401 || (status === 403 && /not authenticated/i.test(detail));
+    const isLoginFlowRequest = LOGIN_FLOW_PATHS.some((p) => requestUrl.includes(p));
+    const isAuthMeRequest = requestUrl.includes(AUTH_ME_PATH);
+
+    // Retry once on 401 (transient backend/cold-start) before treating as session expired
+    if (isAuthFailure && !isLoginFlowRequest && retryCount < 1) {
+      await new Promise((r) => setTimeout(r, 400));
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        try {
+          const retryConfig = { ...error.config, __retryCount: retryCount + 1 };
+          retryConfig.headers = { ...retryConfig.headers, Authorization: `Bearer ${token}` };
+          return await api.request(retryConfig);
+        } catch {
+          // Retry failed - fall through to redirect logic below
+        }
+      }
+    }
+
+    if (isAuthFailure && !isLoginFlowRequest && !isAuthMeRequest) {
       const currentPath = window.location.pathname;
-      // Only remove token and redirect if NOT on auth/login/register pages
-      // This prevents page refresh on login failures
-      // Also check if this is a login request - don't redirect on login failures
-      const isLoginRequest = error.config?.url?.includes('/api/auth/login');
       const isAuthPage = currentPath.includes('/auth') || currentPath.includes('/login') || currentPath.includes('/register');
-      
-      if (!isAuthPage && !isLoginRequest) {
+
+      if (!isAuthPage) {
         localStorage.removeItem('access_token');
-        // Mark session as expired to prevent duplicate messages
         if (!isSessionExpiredShown()) {
           markSessionExpired();
           setRedirectInProgress(true);
-          // Redirect with session expired message
           window.location.href = '/auth?message=Session expired. Please sign in again.';
         }
       }

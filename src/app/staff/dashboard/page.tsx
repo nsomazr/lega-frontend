@@ -21,18 +21,22 @@ export default function StaffDashboardPage() {
   const { toasts, error: showError, removeToast } = useToast();
 
   useEffect(() => {
-    fetchCurrentUser();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (token) fetchCurrentUser(token);
   }, []);
 
   useEffect(() => {
     if (currentUser) {
-      fetchStats();
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      if (token) fetchStats(token);
     }
   }, [currentUser]);
 
-  const fetchCurrentUser = async () => {
+  const fetchCurrentUser = async (token: string) => {
     try {
-      const response = await api.get('/api/auth/me');
+      const response = await api.get('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setCurrentUser(response.data);
       if (!isStaff(response.data?.role)) {
         window.location.href = '/dashboard';
@@ -42,11 +46,12 @@ export default function StaffDashboardPage() {
     }
   };
 
-  const fetchStats = async () => {
+  const fetchStats = async (token: string) => {
     try {
+      const headers = { Authorization: `Bearer ${token}` };
       const [casesRes, docsRes] = await Promise.all([
-        api.get('/api/cases'),
-        api.get('/api/documents')
+        api.get('/api/cases', { headers }),
+        api.get('/api/documents', { headers })
       ]);
       
       const cases = casesRes.data || [];

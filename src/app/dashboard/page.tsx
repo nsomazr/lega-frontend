@@ -40,14 +40,30 @@ export default function Dashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        // Fetch cases and documents to calculate stats
-        const [casesResponse, documentsResponse] = await Promise.all([
-          api.get('/api/cases'),
-          api.get('/api/documents'),
-        ]);
+    let cancelled = false;
 
+    const runFetch = async () => {
+      // Wait for layout to validate token (DashboardLayout fetches /me at 200ms); then re-read token at request time
+      await new Promise((r) => setTimeout(r, 1200));
+      if (cancelled) return;
+
+      const tokenNow = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      if (!tokenNow) {
+        setLoading(false);
+        return;
+      }
+
+      const headers = { Authorization: `Bearer ${tokenNow}` };
+
+      try {
+        const [casesResponse, documentsResponse, userResponse] = await Promise.all([
+          api.get('/api/cases', { headers }),
+          api.get('/api/documents', { headers }),
+          api.get('/api/auth/me', { headers }),
+        ]);
+        if (cancelled) return;
+
+        setUser(userResponse.data);
         const cases = casesResponse.data;
         const documents = documentsResponse.data;
 
@@ -63,24 +79,15 @@ export default function Dashboard() {
           }).length,
         });
       } catch (error) {
-        console.error('Error fetching dashboard stats:', error);
+        if (!cancelled) console.error('Error fetching dashboard stats:', error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchStats();
-    fetchUser();
+    runFetch();
+    return () => { cancelled = true; };
   }, []);
-
-  const fetchUser = async () => {
-    try {
-      const response = await api.get('/api/auth/me');
-      setUser(response.data);
-    } catch (error) {
-      console.error('Error fetching user:', error);
-    }
-  };
 
   const smoothNavigate = (href: string) => {
     setNavigating(true);
@@ -241,7 +248,7 @@ export default function Dashboard() {
         {
           id: 1,
           type: 'case',
-          title: 'Welcome to Lega!',
+          title: 'Welcome to MeLT!',
           description: 'View your cases and connect with lawyers.',
           time: 'Just now',
           icon: FolderOpen,
@@ -250,7 +257,7 @@ export default function Dashboard() {
         {
           id: 2,
           type: 'chat',
-          title: 'Legal Assistant Ready',
+          title: 'MeLT Assistant Ready',
           description: 'Get legal guidance from our assistant.',
           time: '2 minutes ago',
           icon: MessageSquare,
@@ -271,7 +278,7 @@ export default function Dashboard() {
     {
       id: 1,
       type: 'case',
-      title: 'Welcome to Lega!',
+      title: 'Welcome to MeLT!',
       description: 'Start by creating your first case to get organized.',
       time: 'Just now',
       icon: FolderOpen,

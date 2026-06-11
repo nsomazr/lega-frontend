@@ -129,7 +129,7 @@ export default function WelcomeGuide({ storageKey = 'lega_has_seen_welcome' }: W
     const greetingMessage = selectedAudience === 'clients' 
       ? "Hi! I'm a client looking for legal help."
       : selectedAudience === 'lawyers'
-      ? "Hi! I'm a lawyer interested in using Lega for my practice."
+      ? "Hi! I'm a lawyer interested in using MeLT for my practice."
       : "Hi! I'm interested in enterprise solutions for my organization.";
     
     pushUser(greetingMessage);
@@ -164,7 +164,7 @@ export default function WelcomeGuide({ storageKey = 'lega_has_seen_welcome' }: W
             <div className="flex items-center justify-between px-5 py-4 border-b border-secondary-200 dark:border-secondary-700">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-primary-600" />
-                <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">Welcome to Lega</h3>
+                <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">Welcome to MeLT</h3>
               </div>
               <div className="flex items-center gap-2">
                 {messages.length > 0 && (
@@ -214,7 +214,7 @@ export default function WelcomeGuide({ storageKey = 'lega_has_seen_welcome' }: W
                 >
                   {messages.length === 0 && !audience && (
                     <div className="text-sm text-secondary-600 dark:text-secondary-400 text-center py-4">
-                      Select your role above to get started, or ask me anything about Lega!
+                      Select your role above to get started, or ask me anything about MeLT!
                     </div>
                   )}
                   {messages.map((m, idx) => (
@@ -246,7 +246,7 @@ export default function WelcomeGuide({ storageKey = 'lega_has_seen_welcome' }: W
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !isLoading) onSend(); }}
-                    placeholder={audience ? 'Ask a question about using Lega…' : 'Tell me who you are to personalize the help…'}
+                    placeholder={audience ? 'Ask a question about using MeLT…' : 'Tell me who you are to personalize the help…'}
                     className="input h-10"
                     disabled={isLoading}
                   />
