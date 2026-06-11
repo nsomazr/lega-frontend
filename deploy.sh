@@ -23,8 +23,21 @@ export PORT=3003
 export NODE_ENV=production
 export NEXT_PUBLIC_API_URL=https://www.api.msomilegaltech.com
 
+install_dependencies() {
+  # npm ci is more reliable for deployments; dev deps are required for next build
+  if [ -f package-lock.json ]; then
+    npm ci --include=dev
+  else
+    npm install
+  fi
+}
+
 echo -e "${YELLOW}📦 Installing dependencies...${NC}"
-npm install --production=false
+if ! install_dependencies; then
+  echo -e "${YELLOW}⚠️  Install failed (often stale node_modules). Cleaning and retrying...${NC}"
+  rm -rf node_modules
+  install_dependencies
+fi
 
 echo -e "${YELLOW}🔨 Building production application...${NC}"
 npm run build
