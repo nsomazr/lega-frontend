@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { ToastContainer, useToast } from '@/components/Toast';
 import { ArrowLeft, Clock } from 'lucide-react';
 import Link from 'next/link';
+import AuthPageFallback from '@/components/AuthPageFallback';
 
-export default function VerifyOTPPage() {
+function VerifyOTPPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const identifier = searchParams.get('identifier') || '';
@@ -237,5 +238,13 @@ export default function VerifyOTPPage() {
 
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
+  );
+}
+
+export default function VerifyOTPPageWrapper() {
+  return (
+    <Suspense fallback={<AuthPageFallback />}>
+      <VerifyOTPPage />
+    </Suspense>
   );
 }

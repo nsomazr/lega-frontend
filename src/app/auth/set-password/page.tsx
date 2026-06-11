@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { ToastContainer, useToast } from '@/components/Toast';
 import { ArrowLeft, Eye, EyeOff, Lock } from 'lucide-react';
 import Link from 'next/link';
+import AuthPageFallback from '@/components/AuthPageFallback';
 
-export default function SetPasswordPage() {
+function SetPasswordPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const sessionToken = searchParams.get('token') || '';
@@ -174,5 +175,13 @@ export default function SetPasswordPage() {
 
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
+  );
+}
+
+export default function SetPasswordPageWrapper() {
+  return (
+    <Suspense fallback={<AuthPageFallback />}>
+      <SetPasswordPage />
+    </Suspense>
   );
 }

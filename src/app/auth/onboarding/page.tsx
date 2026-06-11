@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { ToastContainer, useToast } from '@/components/Toast';
 import { User, Building2, MapPin, Briefcase, FileText } from 'lucide-react';
+import AuthPageFallback from '@/components/AuthPageFallback';
 
-export default function OnboardingPage() {
+function OnboardingPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const sessionTokenFromUrl = searchParams.get('token') || '';
@@ -300,5 +301,13 @@ export default function OnboardingPage() {
 
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
+  );
+}
+
+export default function OnboardingPageWrapper() {
+  return (
+    <Suspense fallback={<AuthPageFallback />}>
+      <OnboardingPage />
+    </Suspense>
   );
 }
